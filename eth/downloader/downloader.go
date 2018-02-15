@@ -45,7 +45,7 @@ var (
 	MaxReceiptFetch = 256 // Amount of transaction receipts to allow fetching per request
 	MaxStateFetch   = 384 // Amount of node state values to allow fetching per request
 
-	MaxForkAncestry  = 3 * params.EpochDuration // Maximum chain reorganisation
+	MaxForkAncestry  = 1000 * params.EpochDuration // Maximum chain reorganisation
 	rttMinEstimate   = 2 * time.Second          // Minimum round-trip time to target for download requests
 	rttMaxEstimate   = 20 * time.Second         // Maximum round-trip time to target for download requests
 	rttMinConfidence = 0.1                      // Worse confidence factor in our estimated RTT value
@@ -57,8 +57,8 @@ var (
 	qosTuningImpact  = 0.25 // Impact that a new tuning target has on the previous value
 
 	maxQueuedHeaders  = 32 * 1024 // [eth/62] Maximum number of headers to queue for import (DOS protection)
-	maxHeadersProcess = 2048      // Number of header download results to import at once into the chain
-	maxResultsProcess = 2048      // Number of content download results to import at once into the chain
+	maxHeadersProcess = 16536      // Number of header download results to import at once into the chain
+	maxResultsProcess = 16536     // Number of content download results to import at once into the chain
 
 	reorgProtThreshold   = 48 // Threshold number of recent blocks to disable mini reorg protection
 	reorgProtHeaderDelay = 2  // Number of headers to delay delivering to cover mini reorgs

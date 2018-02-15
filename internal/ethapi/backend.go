@@ -113,6 +113,11 @@ func GetAPIs(apiBackend Backend) []rpc.API {
 			Version:   "1.0",
 			Service:   NewPrivateAccountAPI(apiBackend, nonceLock),
 			Public:    false,
+		}, {
+			Namespace: "test",
+			Version:   "2.0",
+			Service:   NewPrivateTestAPI(apiBackend),
+			Public:    false,
 		},
 	}
 }

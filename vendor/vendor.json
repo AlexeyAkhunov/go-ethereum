@@ -934,7 +934,7 @@
 			"revision": "abf0ba0be5d5d36b1f9266463cc320b9a5ab224e",
 			"revisionTime": "2018-03-02T12:15:09Z"
 		},
-		{
+        {
 			"checksumSHA1": "4BwmmgQUhWtizsR2soXND0nqZ1I=",
 			"path": "gopkg.in/sourcemap.v1",
 			"revision": "6e83acea0053641eff084973fee085f0c193c61a",

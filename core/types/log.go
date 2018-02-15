@@ -72,11 +72,11 @@ type rlpStorageLog struct {
 	Address     common.Address
 	Topics      []common.Hash
 	Data        []byte
-	BlockNumber uint64
-	TxHash      common.Hash
-	TxIndex     uint
-	BlockHash   common.Hash
-	Index       uint
+	//BlockNumber uint64
+	//TxHash      common.Hash
+	//TxIndex     uint
+	//BlockHash   common.Hash
+	//Index       uint
 }
 
 // EncodeRLP implements rlp.Encoder.
@@ -104,11 +104,11 @@ func (l *LogForStorage) EncodeRLP(w io.Writer) error {
 		Address:     l.Address,
 		Topics:      l.Topics,
 		Data:        l.Data,
-		BlockNumber: l.BlockNumber,
-		TxHash:      l.TxHash,
-		TxIndex:     l.TxIndex,
-		BlockHash:   l.BlockHash,
-		Index:       l.Index,
+		//BlockNumber: l.BlockNumber,
+		//TxHash:      l.TxHash,
+		//TxIndex:     l.TxIndex,
+		//BlockHash:   l.BlockHash,
+		//Index:       l.Index,
 	})
 }
 
@@ -121,11 +121,11 @@ func (l *LogForStorage) DecodeRLP(s *rlp.Stream) error {
 			Address:     dec.Address,
 			Topics:      dec.Topics,
 			Data:        dec.Data,
-			BlockNumber: dec.BlockNumber,
-			TxHash:      dec.TxHash,
-			TxIndex:     dec.TxIndex,
-			BlockHash:   dec.BlockHash,
-			Index:       dec.Index,
+			//BlockNumber: dec.BlockNumber,
+			//TxHash:      dec.TxHash,
+			//TxIndex:     dec.TxIndex,
+			//BlockHash:   dec.BlockHash,
+			//Index:       dec.Index,
 		}
 	}
 	return err

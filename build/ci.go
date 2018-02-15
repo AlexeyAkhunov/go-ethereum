@@ -80,6 +80,7 @@ var (
 		executablePath("puppeth"),
 		executablePath("rlpdump"),
 		executablePath("wnode"),
+                executablePath("hack"),
 	}
 
 	// Files that end up in the swarm*.zip archive.
@@ -126,6 +127,11 @@ var (
 			BinaryName:  "swarm",
 			PackageName: "ethereum-swarm",
 			Description: "Ethereum Swarm daemon and tools",
+		},
+		{
+			BinaryName:  "hack",
+			PackageName: "hack",
+			Description: "Tool for experiments with geth code and data",
 		},
 	}
 

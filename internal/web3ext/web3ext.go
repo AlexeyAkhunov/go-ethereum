@@ -32,6 +32,7 @@ var Modules = map[string]string{
 	"shh":        Shh_JS,
 	"swarmfs":    SWARMFS_JS,
 	"txpool":     TxPool_JS,
+	"test":       Test_JS,
 }
 
 const Chequebook_JS = `
@@ -745,6 +746,20 @@ web3._extend({
 		new web3._extend.Property({
 			name: 'selfDrops',
 			getter: 'account_selfDrops'
+		}),
+	]
+});
+`
+
+const Test_JS = `
+web3._extend({
+	property: 'test',
+	methods: [
+		new web3._extend.Method({
+			name: 'setChainParams',
+			call: 'test_setChainParams',
+			params: 1,
+			inputFormatter: [null]
 		}),
 	]
 });
