@@ -37,6 +37,14 @@ func NewJSONLogger(cfg *LogConfig, writer io.Writer) *JSONLogger {
 	return &JSONLogger{json.NewEncoder(writer), cfg}
 }
 
+func (l *JSONLogger) CaptureBlockStart(blockNr uint64) error {
+	return nil
+}
+
+func (l *JSONLogger) CaptureBlockEnd(blockNr uint64) error {
+	return nil
+}
+
 func (l *JSONLogger) CaptureStart(depth int, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) error {
 	return nil
 }

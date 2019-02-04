@@ -516,6 +516,14 @@ func wrapError(context string, err error) error {
 	return fmt.Errorf("%v    in server-side tracer function '%v'", err, context)
 }
 
+func (jst *Tracer) CaptureBlockStart(blockNr uint64) error {
+	return nil
+}
+
+func (jst *Tracer) CaptureBlockEnd(blockNr uint64) error {
+	return nil
+}
+
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
 func (jst *Tracer) CaptureStart(depth int, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) error {
 	if depth != 0 {

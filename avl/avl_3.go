@@ -2565,3 +2565,58 @@ func (t *Avl3) PrintStats() {
 	fmt.Printf("Size of pageCache: %d, hit ratio: %0.3f\n", t.pageCache.Len(), float64(t.pageCacheHits)/float64(t.pageCacheHits+t.pageCacheMisses+1))
 	fmt.Printf("Solid refs: %v, solid tree sizes: %v, pinned: %d, free: %d\n", t.solidRefs, t.solidTreeSizes, t.solidPinned, t.solidFree)
 }
+
+func (t *Avl3) scan(r Ref3, m map[PageID]struct{}) (int, int) {
+	switch r := r.(type) {
+	case *Leaf3:
+		return 0, 1
+	case *Fork3:
+		lDepth, lLeaves := t.scan(r.left, m)
+		rDepth, rLeaves := t.scan(r.right, m)
+		if lDepth > rDepth {
+			return lDepth, lLeaves + rLeaves
+		} else {
+			return rDepth, lLeaves + rLeaves
+		}
+	case *Arrow3:
+		point := t.deserialisePage(r.pageId, r.max, r.height, 0, false)
+		if _, ok := m[r.pageId]; !ok {
+			m[r.pageId] = struct{}{}
+		}
+		depth, leaves := t.scan(point, m)
+		return 1 + depth, leaves
+	}
+	return 0, 0
+}
+
+func (t *Avl3) Analyse() {
+	fmt.Printf("Number of versions: %d, current version: %d\n", len(t.versions), t.currentVersion)
+	var v Version
+	for v = 0; v < t.currentVersion; v++ {
+		version := t.versions[v]
+		m := make(map[PageID]struct{})
+		root := t.deserialisePage(version.pageId, nil, 0, version.treeIndex, false)
+		depth, leaves := t.scan(root, m)
+		if v < 1000000 {
+			fmt.Printf("Version: %d, max depth: %d, pages: %d, leaves: %d\n", v, depth, len(m), leaves)
+		}
+	}
+	/*
+	var verdata [12]byte
+	var lastVersion Version3
+	for n, _ := t.verFile.ReadAt(verdata[:], int64(t.currentVersion)*int64(12)); n >0; n, _ = t.verFile.ReadAt(verdata[:], int64(t.currentVersion)*int64(12)) {
+		lastVersion.pageId = PageID(binary.BigEndian.Uint64(verdata[:]))
+		lastVersion.treeIndex = binary.BigEndian.Uint32(verdata[8:])
+		t.versions[t.currentVersion] = lastVersion
+		t.currentVersion++
+	}
+	if t.currentVersion > 0 {
+		t.maxPageId = lastVersion.pageId
+		fmt.Printf("Deserialising page %d\n", lastVersion.pageId)
+		root := t.deserialisePage(lastVersion.pageId, nil, 0, lastVersion.treeIndex, false)
+		prevRootArrow := &Arrow3{height: root.getheight(), max: root.getmax()}
+		t.root = &Arrow3{pageId: lastVersion.pageId, height: root.getheight(), max: root.getmax(), arrow: prevRootArrow}
+		t.prevRoot = prevRootArrow
+	}
+	*/
+}

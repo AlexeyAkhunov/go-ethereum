@@ -981,6 +981,14 @@ func NewCreationTracer(w io.Writer) CreationTracer {
 	return CreationTracer{w: w}
 }
 
+func (ct CreationTracer) CaptureBlockStart(blockNr uint64) error {
+	return nil
+}
+
+func (ct CreationTracer) CaptureBlockEnd(blockNr uint64) error {
+	return nil
+}
+
 func (ct CreationTracer) CaptureStart(depth int, from common.Address, to common.Address, call bool, input []byte, gas uint64, value *big.Int) error {
 	return nil
 }
@@ -1690,6 +1698,14 @@ func NewTokenTracer() TokenTracer {
 	}
 }
 
+func (tt TokenTracer) CaptureBlockStart(blockNr uint64) error {
+	return nil
+}
+
+func (tt TokenTracer) CaptureBlockEnd(blockNr uint64) error {
+	return nil
+}
+
 func (tt TokenTracer) CaptureStart(depth int, from common.Address, to common.Address, call bool, input []byte, gas uint64, value *big.Int) error {
 	if len(input) < 68 {
 		return nil
@@ -2257,6 +2273,323 @@ func makeTokenAllowances() {
 	}
 }
 
+func countDepths() {
+	startTime := time.Now()
+	db, err := bolt.Open("/Volumes/tb41/turbo-geth-10/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
+	check(err)
+	defer db.Close()
+	var occups [64]int // Occupancy of the current level
+	var counts [64][17]int
+	var prev [32]byte
+	count := 0
+	err = db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(state.AccountsBucket)
+		if b == nil {
+			return nil
+		}
+		c := b.Cursor()
+		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+			if count == 0 {
+				for i := 0; i < 64; i++ {
+					occups[i] = 1
+				}
+			} else {
+				// Find the first nibble where k and prev are different
+				var mask byte = 0xf0
+				var i int
+				for i = 0; i < 64; i++ {
+					idx := i >> 1
+					if (k[idx]&mask) != (prev[idx]&mask) {
+						break
+					}
+					mask ^= 0xff
+				}
+				// Finalise lower nodes
+				after1 := false
+				for j := i+1; j < 64; j++ {
+					if occups[j] > 1 || !after1 {
+						counts[j][occups[j]]++
+					}
+					if occups[j] == 1 {
+						after1 = true
+					} else {
+						after1 = false
+						occups[j] = 1
+					}
+				}
+				occups[i]++
+			}
+			copy(prev[:], k)
+			count++
+			if count%100000 == 0 {
+				fmt.Printf("Processed %d account records\n", count)
+			}
+		}
+		after1 := false
+		for j := 0; j < 64; j++ {
+			if occups[j] > 1 || !after1 {
+				counts[j][occups[j]]++
+			}
+			if occups[j] == 1 {
+				after1 = true
+			} else {
+				after1 = false
+				occups[j] = 1
+			}
+		}
+		fmt.Printf("Processed %d account records\n", count)
+		return nil
+	})
+	check(err)
+	nodes := 0
+	for i := 0; i < 64; i++ {
+		exists := false
+		for j := 1; j <= 16; j++ {
+			if counts[i][j] > 0 {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			break
+		}
+		fmt.Printf("LEVEL %d ==========================\n", i)
+		for j := 1; j <= 16; j++ {
+			if counts[i][j] > 0 {
+				fmt.Printf("%d: %d  ", j, counts[i][j])
+				nodes += counts[i][j]
+			}
+		}
+		fmt.Printf("\n")
+	}
+	fmt.Printf("Total number of nodes: %d\n", nodes)
+	fmt.Printf("Count depth took %s\n", time.Since(startTime))
+}
+
+func countStorageDepths() {
+	startTime := time.Now()
+	db, err := bolt.Open("/Volumes/tb41/turbo-geth-10/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
+	check(err)
+	defer db.Close()
+	var occups [64]int // Occupancy of the current level
+	var counts [64][17]int
+	var prevAddr [20]byte
+	var prev [32]byte
+	var accountExists bool
+	var filtered int
+	count := 0
+	err = db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(state.StorageBucket)
+		if b == nil {
+			return nil
+		}
+		ab := tx.Bucket(state.AccountsBucket)
+		if ab == nil {
+			return nil
+		}
+		c := b.Cursor()
+		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+			addr := k[:20]
+			sameAddr := bytes.Equal(addr, prevAddr[:])
+			if !sameAddr {
+				copy(prevAddr[:], addr)
+				accountExists = ab.Get(crypto.Keccak256(addr[:])) != nil
+				if !accountExists {
+					filtered++
+				}
+			}
+			// Filter out storage of non-existent accounts
+			if !accountExists {
+				continue
+			}
+			key := k[20:52]
+			if count == 0 {
+				for i := 0; i < 64; i++ {
+					occups[i] = 1
+				}
+			} else {
+				if sameAddr {
+					// Find the first nibble where k and prev are different
+					var mask byte = 0xf0
+					var i int
+					for i = 0; i < 64; i++ {
+						idx := i >> 1
+						if (key[idx]&mask) != (prev[idx]&mask) {
+							break
+						}
+						mask ^= 0xff
+					}
+					// Finalise lower nodes
+					after1 := false
+					for j := i+1; j < 64; j++ {
+						if occups[j] > 1 || !after1 {
+							counts[j][occups[j]]++
+						}
+						if occups[j] == 1 {
+							after1 = true
+						} else {
+							after1 = false
+							occups[j] = 1
+						}
+					}
+					occups[i]++
+				} else {
+					after1 := false
+					for j := 0; j < 64; j++ {
+						if occups[j] > 1 || !after1 {
+							counts[j][occups[j]]++
+						}
+						if occups[j] == 1 {
+							after1 = true
+						} else {
+							after1 = false
+							occups[j] = 1
+						}
+					}
+				}
+			}
+			copy(prev[:], key)
+			count++
+			if count%100000 == 0 {
+				fmt.Printf("Processed %d storage records, filtered accounts: %d\n", count, filtered)
+			}
+		}
+		after1 := false
+		for j := 0; j < 64; j++ {
+			if occups[j] > 1 || !after1 {
+				counts[j][occups[j]]++
+			}
+			if occups[j] == 1 {
+				after1 = true
+			} else {
+				after1 = false
+				occups[j] = 1
+			}
+		}
+		fmt.Printf("Processed %d storage records, filtered accounts: %d\n", count, filtered)
+		return nil
+	})
+	check(err)
+	nodes := 0
+	for i := 0; i < 64; i++ {
+		exists := false
+		for j := 1; j <= 16; j++ {
+			if counts[i][j] > 0 {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			break
+		}
+		fmt.Printf("LEVEL %d ==========================\n", i)
+		for j := 1; j <= 16; j++ {
+			if counts[i][j] > 0 {
+				fmt.Printf("%d: %d  ", j, counts[i][j])
+				nodes += counts[i][j]
+			}
+		}
+		fmt.Printf("\n")
+	}
+	fmt.Printf("Total number of nodes: %d\n", nodes)
+	fmt.Printf("Count depth took %s\n", time.Since(startTime))
+}
+
+type StorageTracer struct {
+}
+
+func NewStorageTracer() StorageTracer {
+	return StorageTracer{
+	}
+}
+
+func (st StorageTracer) CaptureBlockStart(blockNr uint64) error {
+	return nil
+}
+func (st StorageTracer) CaptureBlockEnd(blockNr uint64) error {
+	return nil
+}
+func (st StorageTracer) CaptureStart(depth int, from common.Address, to common.Address, call bool, input []byte, gas uint64, value *big.Int) error {
+	return nil
+}
+func (st StorageTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *vm.Stack, contract *vm.Contract, depth int, err error) error {
+	return nil
+}
+func (st StorageTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *vm.Stack, contract *vm.Contract, depth int, err error) error {
+	return nil
+}
+func (st StorageTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error {
+	return nil
+}
+func (st StorageTracer) CaptureCreate(creator common.Address, creation common.Address) error {
+	return nil
+}
+
+func storageReadWrites() {
+	sigs := make(chan os.Signal, 1)
+	interruptCh := make(chan bool, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		<-sigs
+		interruptCh <- true
+	}()
+
+	ethDb, err := ethdb.NewLDBDatabase("/Volumes/tb41/turbo-geth-10/geth/chaindata")
+	check(err)
+	defer ethDb.Close()
+	chainConfig := params.MainnetChainConfig
+	st := NewStorageTracer()
+	vmConfig := vm.Config{Tracer: st, Debug: true}
+	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil)
+	check(err)
+	blockNum := uint64(*block)
+	if blockNum > 1 {
+		srwFile, err := os.Open("/Volumes/tb41/turbo-geth/storage_read_writes.csv")
+		check(err)
+		srwReader := csv.NewReader(bufio.NewReader(srwFile))
+		for records, _ := srwReader.Read(); records != nil; records, _ = srwReader.Read() {
+		}
+		srwFile.Close()
+	}
+	interrupt := false
+	for !interrupt {
+		block := bc.GetBlockByNumber(blockNum)
+		if block == nil {
+			break
+		}
+		dbstate := state.NewDbState(ethDb, block.NumberU64()-1)
+		statedb := state.New(dbstate)
+		signer := types.MakeSigner(chainConfig, block.Number())
+		for _, tx := range block.Transactions() {
+			// Assemble the transaction call message and return if the requested offset
+			msg, _ := tx.AsMessage(signer)
+			context := core.NewEVMContext(msg, block.Header(), bc, nil)
+			// Not yet the searched for transaction, execute on top of the current state
+			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
+			if _, _, _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
+				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
+			}
+		}
+		blockNum++
+		if blockNum % 1000 == 0 {
+			fmt.Printf("Processed %d blocks\n", blockNum)
+		}
+		// Check for interrupts
+		select {
+		case interrupt = <-interruptCh:
+			fmt.Println("interrupted, please wait for cleanup...")
+		default:
+		}
+	}
+	fmt.Printf("Writing dataset...\n")
+	f, err := os.Create("/Volumes/tb41/turbo-geth/storage_read_writes.csv")
+	check(err)
+	defer f.Close()
+	w := bufio.NewWriter(f)
+	defer w.Flush()
+	fmt.Printf("Next time specify -block %d\n", blockNum)
+}
 
 func main() {
 	flag.Parse()
@@ -2288,5 +2621,8 @@ func main() {
 	//nonTokenUsage()
 	//makeTokenBalances()
 	//tokenBalances()
-	makeTokenAllowances()
+	//makeTokenAllowances()
+	//countDepths()
+	//countStorageDepths()
+	storageReadWrites()
 }

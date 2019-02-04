@@ -28,10 +28,11 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/crypto/sha3"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
+
+	"golang.org/x/crypto/sha3"
 )
 
 var (
@@ -40,7 +41,7 @@ var (
 	hashlen    = flag.Int("hashlen", 32, "size of the hashes for inter-page references")
 	datadir   = flag.String("datadir", ".", "directory for data files")
 	load       = flag.Bool("load", false, "load blocks into pages")
-	spacescan  = flag.Bool("spacescan", false, "perform space scan")
+	analysis  = flag.Bool("analysis", false, "perform analysis")
 )
 
 var emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
@@ -564,7 +565,7 @@ func newHasher() *hasher {
 	select {
 		case h = <- hasherPool:
 		default:
-			h = &hasher{sha: sha3.NewKeccak256().(keccakState)}
+			h = &hasher{sha: sha3.NewLegacyKeccak256().(keccakState)}
 	}
 	return h
 }
@@ -961,6 +962,12 @@ func avltest() {
 	}
 }
 
+func doAnalysis() {
+	morus := NewMorusDb(*datadir, *hashlen)
+	defer morus.Close()
+	morus.db.Analyse()
+}
+
 func main() {
 	flag.Parse()
     if *cpuprofile != "" {
@@ -975,6 +982,10 @@ func main() {
         }
         defer pprof.StopCPUProfile()
     }
-    loadAll()
+    if *analysis {
+    	doAnalysis()
+    } else {
+    	loadAll()
+    }
 	//avltest()
 }
