@@ -2541,6 +2541,7 @@ func (st *StorageTracer) CaptureCreate(creator common.Address, creation common.A
 }
 
 func storageReadWrites() {
+	startTime := time.Now()
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -2610,6 +2611,7 @@ func storageReadWrites() {
 	}
 	fmt.Printf("Processed %d blocks, totalSstores %d, nakedSstores %d, totalSloads %d, nakedSloads %d\n", blockNum, totalSstores, nakedSstores, totalSloads, nakedSloads)
 	fmt.Printf("Next time specify -block %d\n", blockNum)
+	fmt.Printf("Storage read/write analysis took %s\n", time.Since(startTime))
 }
 
 func main() {
