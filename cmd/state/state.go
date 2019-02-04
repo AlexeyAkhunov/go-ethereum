@@ -981,14 +981,6 @@ func NewCreationTracer(w io.Writer) CreationTracer {
 	return CreationTracer{w: w}
 }
 
-func (ct CreationTracer) CaptureBlockStart(blockNr uint64) error {
-	return nil
-}
-
-func (ct CreationTracer) CaptureBlockEnd(blockNr uint64) error {
-	return nil
-}
-
 func (ct CreationTracer) CaptureStart(depth int, from common.Address, to common.Address, call bool, input []byte, gas uint64, value *big.Int) error {
 	return nil
 }
@@ -1696,14 +1688,6 @@ func NewTokenTracer() TokenTracer {
 		addrs: make([]common.Address, 16384),
 		startMode: make([]bool, 16384),
 	}
-}
-
-func (tt TokenTracer) CaptureBlockStart(blockNr uint64) error {
-	return nil
-}
-
-func (tt TokenTracer) CaptureBlockEnd(blockNr uint64) error {
-	return nil
 }
 
 func (tt TokenTracer) CaptureStart(depth int, from common.Address, to common.Address, call bool, input []byte, gas uint64, value *big.Int) error {
@@ -2496,32 +2480,63 @@ func countStorageDepths() {
 }
 
 type StorageTracer struct {
+	loaded map[common.Address]map[common.Hash]struct{}
+	totalSstores int
+	nakedSstores int
+	totalSloads int
+	nakedSloads int
 }
 
-func NewStorageTracer() StorageTracer {
-	return StorageTracer{
+func NewStorageTracer() *StorageTracer {
+	return &StorageTracer{
+		loaded: make(map[common.Address]map[common.Hash]struct{}),
 	}
 }
 
-func (st StorageTracer) CaptureBlockStart(blockNr uint64) error {
+func (st *StorageTracer) CaptureStart(depth int, from common.Address, to common.Address, call bool, input []byte, gas uint64, value *big.Int) error {
 	return nil
 }
-func (st StorageTracer) CaptureBlockEnd(blockNr uint64) error {
+func (st *StorageTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *vm.Stack, contract *vm.Contract, depth int, err error) error {
+	if op == vm.SSTORE {
+		addr := contract.Address()
+		loc := common.BigToHash(stack.Back(0))
+		if l1, ok1 := st.loaded[addr]; ok1 {
+			if _, ok2 := l1[loc]; !ok2 {
+				st.nakedSstores++
+				l1[loc] = struct{}{}
+			}
+		} else {
+			st.nakedSstores++
+			l2 := make(map[common.Hash]struct{})
+			l2[loc] = struct{}{}
+			st.loaded[addr] = l2
+		}
+		st.totalSstores++
+	} else if op == vm.SLOAD {
+		addr := contract.Address()
+		loc := common.BigToHash(stack.Back(0))
+		if l1, ok1 := st.loaded[addr]; ok1 {
+			if _, ok2 := l1[loc]; !ok2 {
+				st.nakedSloads++
+				l1[loc] = struct{}{}
+			}
+		} else {
+			st.nakedSloads++
+			l2 := make(map[common.Hash]struct{})
+			l2[loc] = struct{}{}
+			st.loaded[addr] = l2
+		}
+		st.totalSloads++
+	}
 	return nil
 }
-func (st StorageTracer) CaptureStart(depth int, from common.Address, to common.Address, call bool, input []byte, gas uint64, value *big.Int) error {
+func (st *StorageTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *vm.Stack, contract *vm.Contract, depth int, err error) error {
 	return nil
 }
-func (st StorageTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *vm.Stack, contract *vm.Contract, depth int, err error) error {
+func (st *StorageTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error {
 	return nil
 }
-func (st StorageTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *vm.Stack, contract *vm.Contract, depth int, err error) error {
-	return nil
-}
-func (st StorageTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error {
-	return nil
-}
-func (st StorageTracer) CaptureCreate(creator common.Address, creation common.Address) error {
+func (st *StorageTracer) CaptureCreate(creator common.Address, creation common.Address) error {
 	return nil
 }
 
@@ -2539,20 +2554,21 @@ func storageReadWrites() {
 	check(err)
 	defer ethDb.Close()
 	chainConfig := params.MainnetChainConfig
+	srwFile, err := os.OpenFile("/Volumes/tb41/turbo-geth/storage_read_writes.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	check(err)
+	defer srwFile.Close()
+	w := bufio.NewWriter(srwFile)
+	defer w.Flush()
 	st := NewStorageTracer()
 	vmConfig := vm.Config{Tracer: st, Debug: true}
 	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil)
 	check(err)
 	blockNum := uint64(*block)
-	if blockNum > 1 {
-		srwFile, err := os.Open("/Volumes/tb41/turbo-geth/storage_read_writes.csv")
-		check(err)
-		srwReader := csv.NewReader(bufio.NewReader(srwFile))
-		for records, _ := srwReader.Read(); records != nil; records, _ = srwReader.Read() {
-		}
-		srwFile.Close()
-	}
 	interrupt := false
+	totalSstores := 0
+	nakedSstores := 0
+	totalSloads := 0
+	nakedSloads := 0
 	for !interrupt {
 		block := bc.GetBlockByNumber(blockNum)
 		if block == nil {
@@ -2561,6 +2577,11 @@ func storageReadWrites() {
 		dbstate := state.NewDbState(ethDb, block.NumberU64()-1)
 		statedb := state.New(dbstate)
 		signer := types.MakeSigner(chainConfig, block.Number())
+		st.loaded = make(map[common.Address]map[common.Hash]struct{})
+		st.totalSstores = 0
+		st.nakedSstores = 0
+		st.totalSloads = 0
+		st.nakedSloads = 0
 		for _, tx := range block.Transactions() {
 			// Assemble the transaction call message and return if the requested offset
 			msg, _ := tx.AsMessage(signer)
@@ -2571,9 +2592,14 @@ func storageReadWrites() {
 				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
 			}
 		}
+		fmt.Fprintf(w, "%d,%d,%d,%d,%d\n", blockNum, st.totalSstores, st.nakedSstores, st.totalSloads, st.nakedSloads)
+		totalSstores += st.totalSstores
+		nakedSstores += st.nakedSstores
+		totalSloads += st.totalSloads
+		nakedSloads += st.nakedSloads
 		blockNum++
 		if blockNum % 1000 == 0 {
-			fmt.Printf("Processed %d blocks\n", blockNum)
+			fmt.Printf("Processed %d blocks, totalSstores %d, nakedSstores %d, totalSloads %d, nakedSloads %d\n", blockNum, totalSstores, nakedSstores, totalSloads, nakedSloads)
 		}
 		// Check for interrupts
 		select {
@@ -2582,12 +2608,7 @@ func storageReadWrites() {
 		default:
 		}
 	}
-	fmt.Printf("Writing dataset...\n")
-	f, err := os.Create("/Volumes/tb41/turbo-geth/storage_read_writes.csv")
-	check(err)
-	defer f.Close()
-	w := bufio.NewWriter(f)
-	defer w.Flush()
+	fmt.Printf("Processed %d blocks, totalSstores %d, nakedSstores %d, totalSloads %d, nakedSloads %d\n", blockNum, totalSstores, nakedSstores, totalSloads, nakedSloads)
 	fmt.Printf("Next time specify -block %d\n", blockNum)
 }
 
