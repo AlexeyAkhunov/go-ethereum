@@ -2499,6 +2499,9 @@ func (st *StorageTracer) CaptureStart(depth int, from common.Address, to common.
 func (st *StorageTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *vm.Stack, contract *vm.Contract, depth int, err error) error {
 	if op == vm.SSTORE {
 		addr := contract.Address()
+		if stack.Len() == 0 {
+			return nil
+		}
 		loc := common.BigToHash(stack.Back(0))
 		if l1, ok1 := st.loaded[addr]; ok1 {
 			if _, ok2 := l1[loc]; !ok2 {
@@ -2514,6 +2517,9 @@ func (st *StorageTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas,
 		st.totalSstores++
 	} else if op == vm.SLOAD {
 		addr := contract.Address()
+		if stack.Len() == 0 {
+			return nil
+		}
 		loc := common.BigToHash(stack.Back(0))
 		if l1, ok1 := st.loaded[addr]; ok1 {
 			if _, ok2 := l1[loc]; !ok2 {
