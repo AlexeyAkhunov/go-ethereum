@@ -607,6 +607,14 @@ func (jst *Tracer) CaptureCreate(creator, creation common.Address) error {
 	return nil
 }
 
+func (jst *Tracer) CaptureAccountRead(account common.Address) error {
+	return nil
+}
+
+func (jst *Tracer) CaptureAccountWrite(account common.Address) error {
+	return nil
+}
+
 // GetResult calls the Javascript 'result' function and returns its value, or any accumulated error
 func (jst *Tracer) GetResult() (json.RawMessage, error) {
 	// Transform the context into a JavaScript object and inject into the state

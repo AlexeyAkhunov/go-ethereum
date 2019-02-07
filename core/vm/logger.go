@@ -103,6 +103,8 @@ type Tracer interface {
 	CaptureFault(env *EVM, pc uint64, op OpCode, gas, cost uint64, memory *Memory, stack *Stack, contract *Contract, depth int, err error) error
 	CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error
 	CaptureCreate(creator common.Address, creation common.Address) error
+	CaptureAccountRead(account common.Address) error
+	CaptureAccountWrite(account common.Address) error
 }
 
 // StructLogger is an EVM state logger and implements Tracer.
@@ -208,6 +210,14 @@ func (l *StructLogger) CaptureEnd(depth int, output []byte, gasUsed uint64, t ti
 }
 
 func (l *StructLogger) CaptureCreate(creator common.Address, creation common.Address) error {
+	return nil
+}
+
+func (l *StructLogger) CaptureAccountRead(account common.Address) error {
+	return nil
+}
+
+func (l *StructLogger) CaptureAccountWrite(account common.Address) error {
 	return nil
 }
 

@@ -997,6 +997,12 @@ func (ct CreationTracer) CaptureCreate(creator common.Address, creation common.A
 	_, err := fmt.Fprintf(ct.w, "%x,%x\n", creation, creator)
 	return err
 }
+func (ct CreationTracer) CaptureAccountRead(account common.Address) error {
+	return nil
+}
+func (ct CreationTracer) CaptureAccountWrite(account common.Address) error {
+	return nil
+}
 
 func makeCreators() {
 	sigs := make(chan os.Signal, 1)
@@ -1750,6 +1756,12 @@ func (tt TokenTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t tim
 	return nil
 }
 func (tt TokenTracer) CaptureCreate(creator common.Address, creation common.Address) error {
+	return nil
+}
+func (tt TokenTracer) CaptureAccountRead(account common.Address) error {
+	return nil
+}
+func (tt TokenTracer) CaptureAccountWrite(account common.Address) error {
 	return nil
 }
 
@@ -2545,6 +2557,12 @@ func (st *StorageTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t 
 func (st *StorageTracer) CaptureCreate(creator common.Address, creation common.Address) error {
 	return nil
 }
+func (st *StorageTracer) CaptureAccountRead(account common.Address) error {
+	return nil
+}
+func (st *StorageTracer) CaptureAccountWrite(account common.Address) error {
+	return nil
+}
 
 func storageReadWrites() {
 	startTime := time.Now()
@@ -2620,6 +2638,127 @@ func storageReadWrites() {
 	fmt.Printf("Storage read/write analysis took %s\n", time.Since(startTime))
 }
 
+type AccountsTracer struct {
+	loaded map[common.Address]struct{}
+	totalWrites int
+	nakedWrites int
+	totalReads int
+	nakedReads int
+}
+
+func NewAccountsTracer() *AccountsTracer {
+	return &AccountsTracer{
+		loaded: make(map[common.Address]struct{}),
+	}
+}
+
+func (at *AccountsTracer) CaptureStart(depth int, from common.Address, to common.Address, call bool, input []byte, gas uint64, value *big.Int) error {
+	return nil
+}
+func (at *AccountsTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *vm.Stack, contract *vm.Contract, depth int, err error) error {
+	return nil
+}
+func (at *AccountsTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *vm.Stack, contract *vm.Contract, depth int, err error) error {
+	return nil
+}
+func (at *AccountsTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error {
+	return nil
+}
+func (at *AccountsTracer) CaptureCreate(creator common.Address, creation common.Address) error {
+	return nil
+}
+func (at *AccountsTracer) CaptureAccountRead(account common.Address) error {
+	if _, ok := at.loaded[account]; !ok {
+		at.nakedReads++
+		at.loaded[account] = struct{}{}
+	}
+	at.totalReads++
+	return nil
+}
+func (at *AccountsTracer) CaptureAccountWrite(account common.Address) error {
+	if _, ok := at.loaded[account]; !ok {
+		at.nakedWrites++
+		at.loaded[account] = struct{}{}
+	}
+	at.totalWrites++
+	return nil
+}
+
+func accountsReadWrites() {
+	startTime := time.Now()
+	sigs := make(chan os.Signal, 1)
+	interruptCh := make(chan bool, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		<-sigs
+		interruptCh <- true
+	}()
+
+	ethDb, err := ethdb.NewLDBDatabase("/Volumes/tb41/turbo-geth-10/geth/chaindata")
+	check(err)
+	defer ethDb.Close()
+	chainConfig := params.MainnetChainConfig
+	srwFile, err := os.OpenFile("/Volumes/tb41/turbo-geth/account_read_writes.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	check(err)
+	defer srwFile.Close()
+	w := bufio.NewWriter(srwFile)
+	defer w.Flush()
+	at := NewAccountsTracer()
+	vmConfig := vm.Config{Tracer: at, Debug: false}
+	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil)
+	check(err)
+	blockNum := uint64(*block)
+	interrupt := false
+	totalWrites := 0
+	nakedWrites := 0
+	totalReads := 0
+	nakedReads := 0
+	for !interrupt {
+		block := bc.GetBlockByNumber(blockNum)
+		if block == nil {
+			break
+		}
+		dbstate := state.NewDbState(ethDb, block.NumberU64()-1)
+		statedb := state.New(dbstate)
+		statedb.SetTracer(at)
+		signer := types.MakeSigner(chainConfig, block.Number())
+		at.loaded = make(map[common.Address]struct{})
+		at.totalWrites = 0
+		at.nakedWrites = 0
+		at.totalReads = 0
+		at.nakedReads = 0
+		for _, tx := range block.Transactions() {
+			// Assemble the transaction call message and return if the requested offset
+			msg, _ := tx.AsMessage(signer)
+			context := core.NewEVMContext(msg, block.Header(), bc, nil)
+			// Not yet the searched for transaction, execute on top of the current state
+			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
+			if _, _, _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
+				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
+			}
+		}
+		fmt.Fprintf(w, "%d,%d,%d,%d,%d\n", blockNum, at.totalWrites, at.nakedWrites, at.totalReads, at.nakedReads)
+		totalWrites += at.totalWrites
+		nakedWrites += at.nakedWrites
+		totalReads += at.totalReads
+		nakedReads += at.nakedReads
+		blockNum++
+		if blockNum % 1000 == 0 {
+			fmt.Printf("Processed %d blocks, totalWrites %d, nakedWrites %d, totalReads %d, nakedReads %d\n", blockNum, totalWrites, nakedWrites, totalReads, nakedReads)
+		}
+		// Check for interrupts
+		select {
+		case interrupt = <-interruptCh:
+			fmt.Println("interrupted, please wait for cleanup...")
+		default:
+		}
+	}
+	fmt.Printf("Processed %d blocks, totalWrites %d, nakedWrites %d, totalReads %d, nakedReads %d\n", blockNum, totalWrites, nakedWrites, totalReads, nakedReads)
+	fmt.Printf("Next time specify -block %d\n", blockNum)
+	fmt.Printf("Storage read/write analysis took %s\n", time.Since(startTime))
+}
+
 func main() {
 	flag.Parse()
 	if *cpuprofile != "" {
@@ -2653,5 +2792,6 @@ func main() {
 	//makeTokenAllowances()
 	//countDepths()
 	//countStorageDepths()
-	storageReadWrites()
+	//storageReadWrites()
+	accountsReadWrites()
 }

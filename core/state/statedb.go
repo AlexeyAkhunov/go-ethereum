@@ -26,6 +26,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
 
 	"github.com/petar/GoLLRB/llrb"
@@ -87,6 +88,7 @@ type StateDB struct {
 	journal        *journal
 	validRevisions []revision
 	nextRevisionId int
+	tracer vm.Tracer
 }
 
 // Create a new state from a given trie
@@ -100,6 +102,10 @@ func New(stateReader StateReader) *StateDB {
 		preimages:         make(map[common.Hash][]byte),
 		journal:           newJournal(),
 	}
+}
+
+func (self *StateDB) SetTracer(tracer vm.Tracer) {
+	self.tracer = tracer
 }
 
 // setError remembers the first non-nil error it is called with.
@@ -185,6 +191,9 @@ func (self *StateDB) SubRefund(gas uint64) {
 // Exist reports whether the given account address exists in the state.
 // Notably this also returns true for suicided accounts.
 func (self *StateDB) Exist(addr common.Address) bool {
+	if self.tracer != nil {
+		self.tracer.CaptureAccountRead(addr)
+	}
 	//fmt.Printf("Checking existence of %s\n", hex.EncodeToString(addr[:]))
 	return self.getStateObject(addr) != nil
 }
@@ -192,12 +201,18 @@ func (self *StateDB) Exist(addr common.Address) bool {
 // Empty returns whether the state object is either non-existent
 // or empty according to the EIP161 specification (balance = nonce = code = 0)
 func (self *StateDB) Empty(addr common.Address) bool {
+	if self.tracer != nil {
+		self.tracer.CaptureAccountRead(addr)
+	}
 	so := self.getStateObject(addr)
 	return so == nil || so.empty()
 }
 
 // Retrieve the balance from the given address or 0 if object not found
 func (self *StateDB) GetBalance(addr common.Address) *big.Int {
+	if self.tracer != nil {
+		self.tracer.CaptureAccountRead(addr)
+	}
 	stateObject := self.getStateObject(addr)
 	if stateObject != nil {
 		return stateObject.Balance()
@@ -206,6 +221,9 @@ func (self *StateDB) GetBalance(addr common.Address) *big.Int {
 }
 
 func (self *StateDB) GetNonce(addr common.Address) uint64 {
+	if self.tracer != nil {
+		self.tracer.CaptureAccountRead(addr)
+	}
 	stateObject := self.getStateObject(addr)
 	if stateObject != nil {
 		return stateObject.Nonce()
@@ -215,6 +233,9 @@ func (self *StateDB) GetNonce(addr common.Address) uint64 {
 }
 
 func (self *StateDB) GetCode(addr common.Address) []byte {
+	if self.tracer != nil {
+		self.tracer.CaptureAccountRead(addr)
+	}
 	stateObject := self.getStateObject(addr)
 	if stateObject != nil {
 		return stateObject.Code()
@@ -223,6 +244,9 @@ func (self *StateDB) GetCode(addr common.Address) []byte {
 }
 
 func (self *StateDB) GetCodeSize(addr common.Address) int {
+	if self.tracer != nil {
+		self.tracer.CaptureAccountRead(addr)
+	}
 	stateObject := self.getStateObject(addr)
 	if stateObject == nil {
 		return 0
@@ -238,6 +262,9 @@ func (self *StateDB) GetCodeSize(addr common.Address) int {
 }
 
 func (self *StateDB) GetCodeHash(addr common.Address) common.Hash {
+	if self.tracer != nil {
+		self.tracer.CaptureAccountRead(addr)
+	}
 	stateObject := self.getStateObject(addr)
 	if stateObject == nil {
 		return common.Hash{}
@@ -297,6 +324,9 @@ func (self *StateDB) HasSuicided(addr common.Address) bool {
 
 // AddBalance adds amount to the account associated with addr.
 func (self *StateDB) AddBalance(addr common.Address, amount *big.Int) {
+	if self.tracer != nil {
+		self.tracer.CaptureAccountWrite(addr)
+	}
 	stateObject := self.GetOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.AddBalance(amount)
@@ -305,6 +335,9 @@ func (self *StateDB) AddBalance(addr common.Address, amount *big.Int) {
 
 // SubBalance subtracts amount from the account associated with addr.
 func (self *StateDB) SubBalance(addr common.Address, amount *big.Int) {
+	if self.tracer != nil {
+		self.tracer.CaptureAccountWrite(addr)
+	}
 	stateObject := self.GetOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.SubBalance(amount)
@@ -312,6 +345,9 @@ func (self *StateDB) SubBalance(addr common.Address, amount *big.Int) {
 }
 
 func (self *StateDB) SetBalance(addr common.Address, amount *big.Int) {
+	if self.tracer != nil {
+		self.tracer.CaptureAccountWrite(addr)
+	}
 	stateObject := self.GetOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.SetBalance(amount)
@@ -319,6 +355,9 @@ func (self *StateDB) SetBalance(addr common.Address, amount *big.Int) {
 }
 
 func (self *StateDB) SetNonce(addr common.Address, nonce uint64) {
+	if self.tracer != nil {
+		self.tracer.CaptureAccountWrite(addr)
+	}
 	stateObject := self.GetOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.SetNonce(nonce)
@@ -326,6 +365,9 @@ func (self *StateDB) SetNonce(addr common.Address, nonce uint64) {
 }
 
 func (self *StateDB) SetCode(addr common.Address, code []byte) {
+	if self.tracer != nil {
+		self.tracer.CaptureAccountWrite(addr)
+	}
 	stateObject := self.GetOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.SetCode(crypto.Keccak256Hash(code), code)
@@ -345,6 +387,10 @@ func (self *StateDB) SetState(addr common.Address, key, value common.Hash) {
 // The account's state object is still available until the state is committed,
 // getStateObject will return a non-nil account after Suicide.
 func (self *StateDB) Suicide(addr common.Address) bool {
+	if self.tracer != nil {
+		self.tracer.CaptureAccountRead(addr)
+		self.tracer.CaptureAccountWrite(addr)
+	}
 	stateObject := self.getStateObject(addr)
 	if stateObject == nil {
 		return false
@@ -455,6 +501,10 @@ func (self *StateDB) createObject(addr common.Address, previous *stateObject) (n
 //
 // Carrying over the balance ensures that Ether doesn't disappear.
 func (self *StateDB) CreateAccount(addr common.Address, checkPrev bool) {
+	if self.tracer != nil {
+		self.tracer.CaptureAccountRead(addr)
+		self.tracer.CaptureAccountWrite(addr)
+	}
 	var previous *stateObject
 	if checkPrev {
 		previous = self.getStateObject(addr)

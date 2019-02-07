@@ -88,3 +88,11 @@ func (l *JSONLogger) CaptureEnd(depth int, output []byte, gasUsed uint64, t time
 func (l *JSONLogger) CaptureCreate(creator common.Address, creation common.Address) error {
 	return nil
 }
+
+func (l *JSONLogger) CaptureAccountRead(account common.Address) error {
+	return nil
+}
+
+func (l *JSONLogger) CaptureAccountWrite(account common.Address) error {
+	return nil
+}
