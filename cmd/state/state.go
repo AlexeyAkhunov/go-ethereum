@@ -2905,11 +2905,11 @@ func speculativeExecution() {
 		interruptCh <- true
 	}()
 
-	ethDb, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	ethDb, err := ethdb.NewLDBDatabase("/Volumes/tb41/turbo-geth-10/geth/chaindata")
 	check(err)
 	defer ethDb.Close()
 	chainConfig := params.MainnetChainConfig
-	depFile, err := os.OpenFile("spec_execution.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	depFile, err := os.OpenFile("/Volumes/tb41/turbo-geth/spec_execution.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	check(err)
 	defer depFile.Close()
 	w := bufio.NewWriter(depFile)
@@ -3070,7 +3070,7 @@ func main() {
 	//countStorageDepths()
 	//storageReadWrites()
 	//accountsReadWrites()
-	//speculativeExecution()
-	nakedSstoreChart()
-	nakedSloadChart()
+	speculativeExecution()
+	//nakedSstoreChart()
+	//nakedSloadChart()
 }
