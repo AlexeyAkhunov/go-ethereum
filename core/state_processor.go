@@ -127,16 +127,6 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, tds
 	// Iterate over and process the individual transactions
 	for i, tx := range block.Transactions() {
 		statedb.Prepare(tx.Hash(), block.Hash(), i)
-		/*
-		var h common.Hash = tx.Hash()
-		if bytes.Equal(h[:], common.FromHex("0x48cf98cc871300c4f95e32273feb27f29720f76e09428464e8a4112eff57b00d")) {
-			cfg.Tracer = vm.NewStructLogger(&vm.LogConfig{})
-			cfg.Debug = true
-		}
-		*/
-		if cfg.Debug {
-			fmt.Printf("DEBUG!\n")
-		}
 		receipt, _, err := ApplyTransaction(p.config, p.bc, nil, gp, statedb, tds.TrieStateWriter(), header, tx, usedGas, cfg)
 		if err != nil {
 			return nil, nil, 0, err
@@ -148,24 +138,6 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, tds
 			}
 			receipt.PostState = rootHash.Bytes()
 		}
-		/*
-		if cfg.Tracer != nil {
-			w, err := os.Create("structlogs.txt")
-			if err != nil {
-				panic(err)
-			}
-			encoder := json.NewEncoder(w)
-			logs := FormatLogs(cfg.Tracer.(*vm.StructLogger).StructLogs())
-			if err := encoder.Encode(logs); err != nil {
-				panic(err)
-			}
-			if err := w.Close(); err != nil {
-				panic(err)
-			}
-			cfg.Debug = false
-			cfg.Tracer = nil
-		}
-		*/
 		receipts = append(receipts, receipt)
 		allLogs = append(allLogs, receipt.Logs...)
 	}

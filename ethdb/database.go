@@ -253,7 +253,7 @@ func (db *LDBDatabase) GetS(hBucket, key []byte, timestamp uint64) ([]byte, erro
 	return db.Get(hBucket, composite)
 }
 
-// GetAsOf returns the first pair (k, v) where key is a prefix of key, or nil
+// GetAsOf returns the first pair (k, v) where key is a prefix of k, or nil
 // if there are not such (k, v)
 func (db *LDBDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
 	composite, _ := compositeKeySuffix(key, timestamp)

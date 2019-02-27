@@ -630,9 +630,9 @@ func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 	return err
 }
 
-func (t *Trie) rebuildHashes(db ethdb.Database, key []byte, pos int, blockNr uint64, hashes bool, expected hashNode) (node, hashNode, error) {
+func (t *Trie) rebuildHashes(db ethdb.Database, key []byte, pos int, blockNr uint64, accounts bool, expected hashNode) (node, hashNode, error) {
 	tc := t.NewContinuation(key, pos, expected)
-	r := NewResolver(db, true, true)
+	r := NewResolver(db, true, accounts)
 	r.SetHistorical(t.historical)
 	r.AddContinuation(tc)
 	if err := r.ResolveWithDb(db, blockNr); err != nil {

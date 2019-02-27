@@ -268,11 +268,15 @@ func (db *DB) mmap(minsz int) error {
 
 	if db.memOnly {
 		if minsz > len(db.dataref) {
-			newmem := make([]byte, minsz)
+			size, err := db.mmapSize(minsz)
+			if err != nil {
+				return err
+			}
+			newmem := make([]byte, size)
 			copy(newmem, db.dataref)
 			db.dataref = newmem
 			db.data = (*[maxMapSize]byte)(unsafe.Pointer(&db.dataref[0]))
-			db.datasz = minsz
+			db.datasz = size
 		}
 	} else {
 		info, err := db.file.Stat()

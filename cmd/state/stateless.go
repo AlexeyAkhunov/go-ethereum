@@ -121,7 +121,24 @@ func (slt *StatelessTracer) CaptureAccountWrite(account common.Address) error {
 	return nil
 }
 
+type ProofSizer struct {
+	ethDb ethdb.Database
+}
+
+func NewProofSizer(ethDb ethdb.Database) *ProofSizer {
+	return &ProofSizer{
+		ethDb: ethDb,
+	}
+}
+
+func (ps *ProofSizer) addAccount(account common.Address) {
+}
+
+func (ps *ProofSizer) addStorage(account common.Address, loc common.Hash) {
+}
+
 func stateless() {
+	state.MaxTrieCacheGen = 100000
 	startTime := time.Now()
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
@@ -143,15 +160,28 @@ func stateless() {
 	defer w.Flush()
 	slt := NewStatelessTracer()
 	vmConfig := vm.Config{Tracer: slt, Debug: true}
-	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil)
+	bcb, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFullFaker(), vm.Config{}, nil)
 	check(err)
-	blockNum := uint64(*block)
+	stateDb := ethdb.NewMemDatabase()
+	defer stateDb.Close()
+	_, _, _, err = core.SetupGenesisBlock(stateDb, core.DefaultGenesisBlock())
+	check(err)
+	bc, err := core.NewBlockChain(stateDb, nil, chainConfig, ethash.NewFullFaker(), vmConfig, nil)
+	check(err)
+	bc.SetNoHistory(true)
+	bc.SetResolveReads(true)
+	blockNum := uint64(1)
 	interrupt := false
 	for !interrupt {
-		block := bc.GetBlockByNumber(blockNum)
+		block := bcb.GetBlockByNumber(blockNum)
 		if block == nil {
 			break
 		}
+		_, err = bc.InsertChain(types.Blocks{block})
+		if err != nil {
+			fmt.Printf("Failed on block %d\n", blockNum)
+		}
+		check(err)
 		dbstate := state.NewDbState(ethDb, block.NumberU64()-1)
 
 		// First pass - execute transactions in sequence
@@ -169,7 +199,24 @@ func stateless() {
 			if _, _, _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
 			}
-		}	
+		}
+		ps := &ProofSizer{ethDb: bc.GetTrieDbState().Database()}
+		for account := range slt.accountsReadSet {
+			ps.addAccount(account)
+		}
+		for account := range slt.accountsWriteSet {
+			ps.addAccount(account)
+		}
+		for account, smap := range slt.storageReadSet {
+			for loc := range smap {
+				ps.addStorage(account, loc)
+			}
+		}
+		for account, smap := range slt.storageWriteSet {
+			for loc := range smap {
+				ps.addStorage(account, loc)
+			}
+		}
 
 		fmt.Fprintf(w, "%d,%d,%d\n", blockNum, len(slt.accountsWriteSet), len(slt.storageWriteSet))
 		blockNum++

@@ -832,6 +832,7 @@ type TrieDbState struct {
 	nodeCount        int
 	oldestGeneration uint64
 	noHistory        bool
+	resolveReads     bool
 }
 
 func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
@@ -864,6 +865,11 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 func (tds *TrieDbState) SetHistorical(h bool) {
 	tds.historical = h
 	tds.t.SetHistorical(h)
+}
+
+func (tds *TrieDbState) SetResolveReads(rr bool) {
+	tds.resolveReads = rr
+	tds.t.SetResolveReads(rr)
 }
 
 func (tds *TrieDbState) SetNoHistory(nh bool) {
@@ -1271,6 +1277,7 @@ func (tds *TrieDbState) getStorageTrie(address common.Address, addrHash common.H
 			t = trie.New(account.Root, StorageBucket, address[:], true)
 		}
 		t.SetHistorical(tds.historical)
+		t.SetResolveReads(tds.resolveReads)
 		t.MakeListed(tds.joinGeneration, tds.leftGeneration)
 		tds.storageTries[addrHash] = t
 	}
@@ -1346,10 +1353,10 @@ func (tds *TrieDbState) PruneTries() {
 		tds.t.UnloadOlderThan(gen)
 		tds.oldestGeneration = gen
 		tds.nodeCount -= toRemove
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+		log.Info("Memory", "nodes", tds.nodeCount, "alloc", int(m.Alloc / 1024), "sys", int(m.Sys / 1024), "numGC", int(m.NumGC))
 	}
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	log.Info("Memory", "nodes", tds.nodeCount, "alloc", int(m.Alloc / 1024), "sys", int(m.Sys / 1024), "numGC", int(m.NumGC))
 }
 
 type TrieStateWriter struct {

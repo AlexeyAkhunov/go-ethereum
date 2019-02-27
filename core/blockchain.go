@@ -138,6 +138,7 @@ type BlockChain struct {
 	shouldPreserve func(*types.Block) bool // Function used to determine whether should preserve the given block.
 	noHistory bool
 	enableReceipts bool                    // Whether receipts need to be written to the database
+	resolveReads bool
 }
 
 // NewBlockChain returns a fully initialised block chain using information
@@ -213,6 +214,10 @@ func (bc *BlockChain) SetNoHistory(nh bool) {
 	bc.noHistory = nh
 }
 
+func (bc *BlockChain) SetResolveReads(rr bool) {
+	bc.resolveReads = rr
+}
+
 func (bc *BlockChain) EnableReceipts(er bool) {
 	bc.enableReceipts = er
 }
@@ -224,6 +229,7 @@ func (bc *BlockChain) GetTrieDbState() *state.TrieDbState {
 		var err error
 		bc.trieDbState, err = state.NewTrieDbState(bc.CurrentBlock().Header().Root, bc.db, currentBlockNr)
 		bc.trieDbState.SetNoHistory(bc.noHistory)
+		bc.trieDbState.SetResolveReads(bc.resolveReads)
 		if err != nil {
 			panic(err)
 		}
@@ -903,27 +909,30 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	bc.wg.Add(1)
 	defer bc.wg.Done()
 
-	// Calculate the total difficulty of the block
-	ptd := bc.GetTd(block.ParentHash(), block.NumberU64()-1)
-	if ptd == nil {
-		return NonStatTy, consensus.ErrUnknownAncestor
-	}
 	// Make sure no inconsistent state is leaked during insertion
 	currentBlock := bc.CurrentBlock()
-	//localTd := bc.GetTd(currentBlock.Hash(), currentBlock.NumberU64())
-	externTd := new(big.Int).Add(block.Difficulty(), ptd)
+	if !bc.noHistory {
+		// Calculate the total difficulty of the block
+		ptd := bc.GetTd(block.ParentHash(), block.NumberU64()-1)
+		if ptd == nil {
+			return NonStatTy, consensus.ErrUnknownAncestor
+		}
+		//localTd := bc.GetTd(currentBlock.Hash(), currentBlock.NumberU64())
+		externTd := new(big.Int).Add(block.Difficulty(), ptd)
 
-	// Irrelevant of the canonical status, write the block itself to the database
-	if err := bc.hc.WriteTd(bc.db, block.Hash(), block.NumberU64(), externTd); err != nil {
-		return NonStatTy, err
+		// Irrelevant of the canonical status, write the block itself to the database
+		if err := bc.hc.WriteTd(bc.db, block.Hash(), block.NumberU64(), externTd); err != nil {
+			return NonStatTy, err
+		}
+		rawdb.WriteBlock(bc.db, block)
+	} else {
+		rawdb.WriteHeader(bc.db, block.Header())
 	}
-	rawdb.WriteBlock(bc.db, block)
 
 	tds.SetBlockNr(block.NumberU64())
 	if err := state.Commit(bc.chainConfig.IsEIP158(block.Number()), tds.DbStateWriter()); err != nil {
 		return NonStatTy, err
 	}
-
 	if bc.enableReceipts {
 		rawdb.WriteReceipts(bc.db, block.Hash(), block.NumberU64(), receipts)
 	}
@@ -1054,66 +1063,71 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, []
 		lastCanon     *types.Block
 		coalescedLogs []*types.Log
 	)
+	var verifyFrom int = len(chain)
+	if !bc.noHistory {
+		externTd := big.NewInt(0)
+		if len(chain) > 0 && chain[0].NumberU64() > 0 {
+			d := bc.GetTd(chain[0].ParentHash(), chain[0].NumberU64()-1)
+			if d != nil {
+				externTd = externTd.Set(d)
+			}
+		}
+		localTd := bc.GetTd(bc.CurrentBlock().Hash(), bc.CurrentBlock().NumberU64())
+		for verifyFrom = 0; verifyFrom < len(chain) && localTd.Cmp(externTd) >= 0; verifyFrom++ {
+			header := chain[verifyFrom].Header()
+			err := <- results
+			if err != nil {
+				bc.reportBlock(chain[verifyFrom], nil, err)
+				return 0, events, coalescedLogs, err
+			}
+			externTd = externTd.Add(externTd, header.Difficulty)
+		}
+		if localTd.Cmp(externTd) >= 0 {
+			log.Warn("Ignoring the chain segment because of insufficient difficulty", "external", externTd, "local", localTd)
+			// But we still write the blocks to the database because others might build on top of them
+			td := bc.GetTd(chain[0].ParentHash(), chain[0].NumberU64()-1)
+			for _, block := range chain {
+				log.Warn("Saving", "block", block.NumberU64(), "hash", block.Hash())
+				td = new(big.Int).Add(block.Difficulty(), td)
+				rawdb.WriteBlock(bc.db, block)
+				rawdb.WriteTd(bc.db, block.Hash(), block.NumberU64(), td)
+			}
+			return 0, events, coalescedLogs, nil
+		}
+	}
 
-	externTd := big.NewInt(0)
-	if len(chain) > 0 && chain[0].NumberU64() > 0 {
-		d := bc.GetTd(chain[0].ParentHash(), chain[0].NumberU64()-1)
-		if d != nil {
-			externTd = externTd.Set(d)
-		}
-	}
-	localTd := bc.GetTd(bc.CurrentBlock().Hash(), bc.CurrentBlock().NumberU64())
-	var verifyFrom int
-	for verifyFrom = 0; verifyFrom < len(chain) && localTd.Cmp(externTd) >= 0; verifyFrom++ {
-		header := chain[verifyFrom].Header()
-		err := <- results
-		if err != nil {
-			bc.reportBlock(chain[verifyFrom], nil, err)
-			return 0, events, coalescedLogs, err
-		}
-		externTd = externTd.Add(externTd, header.Difficulty)
-	}
-	if localTd.Cmp(externTd) >= 0 {
-		log.Warn("Ignoring the chain segment because of insufficient difficulty", "external", externTd, "local", localTd)
-		// But we still write the blocks to the database because others might build on top of them
-		td := bc.GetTd(chain[0].ParentHash(), chain[0].NumberU64()-1)
-		for _, block := range chain {
-			log.Warn("Saving", "block", block.NumberU64(), "hash", block.Hash())
-			td = new(big.Int).Add(block.Difficulty(), td)
-			rawdb.WriteBlock(bc.db, block)
-			rawdb.WriteTd(bc.db, block.Hash(), block.NumberU64(), td)
-		}
-		return 0, events, coalescedLogs, nil
-	}
-
+	var offset int
+	var parent *types.Block
+	var parentNumber uint64 = chain[0].NumberU64() - 1
 	// Find correct insertion point for this chain
-	preBlocks := []*types.Block{}
-	parentNumber := chain[0].NumberU64() - 1
-	parentHash := chain[0].ParentHash()
-	parent := bc.GetBlock(parentHash, parentNumber)
-	if parent == nil {
-		log.Error("Chain segment could not be inserted, missing parent", "hash", parentHash)
-		return 0, events, coalescedLogs, fmt.Errorf("Chain segment could not be inserted, missing parent %x", parentHash)
-	}
-	canonicalHash := rawdb.ReadCanonicalHash(bc.db, parentNumber)
-	for canonicalHash != parentHash {
-		log.Warn("Chain segment's parent not on canonical hash, adding to pre-blocks", "block", parentNumber, "hash", parentHash)
-		preBlocks = append(preBlocks, parent)
-		parentNumber--
-		parentHash = parent.ParentHash()
+	if !bc.noHistory {
+		preBlocks := []*types.Block{}
+		parentHash := chain[0].ParentHash()
 		parent = bc.GetBlock(parentHash, parentNumber)
 		if parent == nil {
 			log.Error("Chain segment could not be inserted, missing parent", "hash", parentHash)
-			return 0, events, coalescedLogs, fmt.Errorf("Chain segment could not be inserter, missing parent %x", parentHash)
+			return 0, events, coalescedLogs, fmt.Errorf("Chain segment could not be inserted, missing parent %x", parentHash)
 		}
-		canonicalHash = rawdb.ReadCanonicalHash(bc.db, parentNumber)
-	}
-	for left, right := 0, len(preBlocks)-1; left < right; left, right = left+1, right-1 {
-		preBlocks[left], preBlocks[right] = preBlocks[right], preBlocks[left]
-	}
-	offset := len(preBlocks)
-	if offset > 0 {
-		chain = append(preBlocks, chain...)
+		canonicalHash := rawdb.ReadCanonicalHash(bc.db, parentNumber)
+		for canonicalHash != parentHash {
+			log.Warn("Chain segment's parent not on canonical hash, adding to pre-blocks", "block", parentNumber, "hash", parentHash)
+			preBlocks = append(preBlocks, parent)
+			parentNumber--
+			parentHash = parent.ParentHash()
+			parent = bc.GetBlock(parentHash, parentNumber)
+			if parent == nil {
+				log.Error("Chain segment could not be inserted, missing parent", "hash", parentHash)
+				return 0, events, coalescedLogs, fmt.Errorf("Chain segment could not be inserter, missing parent %x", parentHash)
+			}
+			canonicalHash = rawdb.ReadCanonicalHash(bc.db, parentNumber)
+		}
+		for left, right := 0, len(preBlocks)-1; left < right; left, right = left+1, right-1 {
+			preBlocks[left], preBlocks[right] = preBlocks[right], preBlocks[left]
+		}
+		offset = len(preBlocks)
+		if offset > 0 {
+			chain = append(preBlocks, chain...)
+		}
 	}
 	// Start a parallel signature recovery (signer will fluke on fork transition, minimal perf loss)
 	senderCacher.recoverFromBlocks(types.MakeSigner(bc.chainConfig, chain[0].Number()), chain)
@@ -1183,13 +1197,14 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, []
 		if i > 0 {
 			parent = chain[i-1]
 		}
-		readBlockNr := parent.NumberU64()
+		readBlockNr := parentNumber
 		var root common.Hash
 		if bc.trieDbState == nil {
 			currentBlockNr := bc.CurrentBlock().NumberU64()
 			log.Info("Creating StateDB from latest state", "block", currentBlockNr)
 			bc.trieDbState, err = state.NewTrieDbState(bc.CurrentBlock().Header().Root, bc.db, currentBlockNr)
 			bc.trieDbState.SetNoHistory(bc.noHistory)
+			bc.trieDbState.SetResolveReads(bc.resolveReads)
 			if err != nil {
 				return k, events, coalescedLogs, err
 			}
@@ -1199,8 +1214,11 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, []
 		if err != nil {
 			return k, events, coalescedLogs, err
 		}
-		parentRoot := parent.Root()
-		if root != parentRoot {
+		var parentRoot common.Hash
+		if parent != nil {
+			parentRoot = parent.Root()
+		}
+		if parent != nil && root != parentRoot {
 			log.Info("Rewinding", "to block", readBlockNr)
 			if _, err = bc.db.Commit(); err != nil {
 				log.Error("Could not commit chainDb before rewinding", err)

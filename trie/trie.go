@@ -62,6 +62,7 @@ type Trie struct {
 	accounts        bool
 
 	historical      bool
+	resolveReads    bool
 	joinGeneration  func(gen uint64)
 	leftGeneration  func(gen uint64)
 }
@@ -105,6 +106,10 @@ func (t *Trie) SetHistorical(h bool) {
 	}
 }
 
+func (t *Trie) SetResolveReads(rr bool) {
+	t.resolveReads = rr
+}
+
 func (t *Trie) MakeListed(joinGeneration, leftGeneration func (gen uint64)) {
 	t.joinGeneration = joinGeneration
 	t.leftGeneration = leftGeneration
@@ -131,7 +136,7 @@ func (t *Trie) Get(db ethdb.Database, key []byte, blockNr uint64) []byte {
 // If a node was not found in the database, a MissingNodeError is returned.
 func (t *Trie) TryGet(db ethdb.Database, key []byte, blockNr uint64) (value []byte, err error) {
 	k := keybytesToHex(key)
-	value, gotValue := t.tryGet1(t.root, k, 0, blockNr)
+	value, gotValue := t.tryGet1(db, t.root, k, 0, blockNr)
 	if !gotValue {
 		value, err = t.tryGet(db, t.root, key, 0, blockNr)
 	}
@@ -293,7 +298,7 @@ func (t *Trie) tryGet(dbr DatabaseReader, origNode node, key []byte, pos int, bl
 	return
 }
 
-func (t *Trie) tryGet1(origNode node, key []byte, pos int, blockNr uint64) (value []byte, gotValue bool) {
+func (t *Trie) tryGet1(db ethdb.Database, origNode node, key []byte, pos int, blockNr uint64) (value []byte, gotValue bool) {
 	switch n := (origNode).(type) {
 	case nil:
 		return nil, true
@@ -308,7 +313,7 @@ func (t *Trie) tryGet1(origNode node, key []byte, pos int, blockNr uint64) (valu
 			value, gotValue = nil, true
 		} else {
 			adjust = true
-			value, gotValue = t.tryGet1(n.Val, key, pos+len(nKey), blockNr)
+			value, gotValue = t.tryGet1(db, n.Val, key, pos+len(nKey), blockNr)
 		}
 		if adjust {
 			n.adjustTod(blockNr)
@@ -321,10 +326,10 @@ func (t *Trie) tryGet1(origNode node, key []byte, pos int, blockNr uint64) (valu
 		switch key[pos] {
 		case i1:
 			adjust = n.tod(blockNr) == n.child1.tod(blockNr)
-			value, gotValue = t.tryGet1(n.child1, key, pos+1, blockNr)
+			value, gotValue = t.tryGet1(db, n.child1, key, pos+1, blockNr)
 		case i2:
 			adjust = n.tod(blockNr) == n.child2.tod(blockNr)
-			value, gotValue = t.tryGet1(n.child2, key, pos+1, blockNr)
+			value, gotValue = t.tryGet1(db, n.child2, key, pos+1, blockNr)
 		default:
 			adjust = false
 			value, gotValue = nil, true
@@ -337,13 +342,21 @@ func (t *Trie) tryGet1(origNode node, key []byte, pos int, blockNr uint64) (valu
 		n.updateT(blockNr, t.joinGeneration, t.leftGeneration)
 		child := n.Children[key[pos]]
 		adjust := child != nil && n.tod(blockNr) == child.tod(blockNr)
-		value, gotValue = t.tryGet1(child, key, pos+1, blockNr)
+		value, gotValue = t.tryGet1(db, child, key, pos+1, blockNr)
 		if adjust {
 			n.adjustTod(blockNr)
 		}
 		return
 	case hashNode:
-		return nil, false
+		if t.resolveReads {
+			nd, err := t.resolveHash(db, n, key, pos, blockNr)
+			if err != nil {
+				panic(err)
+			}
+			return t.tryGet1(db, nd, key, pos, blockNr)
+		} else {
+			return nil, false
+		}
 	default:
 		panic(fmt.Sprintf("%T: invalid node: %v", origNode, origNode))
 	}
@@ -1196,7 +1209,7 @@ func concat(s1 []byte, s2 ...byte) []byte {
 }
 
 func (t *Trie) resolveHash(db ethdb.Database, n hashNode, key []byte, pos int, blockNr uint64) (node, error) {
-	root, gotHash, err := t.rebuildHashes(db, key, pos, blockNr, false, n)
+	root, gotHash, err := t.rebuildHashes(db, key, pos, blockNr, t.accounts, n)
 	if err != nil {
 		return nil, err
 	}
