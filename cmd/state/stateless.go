@@ -138,7 +138,7 @@ func (ps *ProofSizer) addStorage(account common.Address, loc common.Hash) {
 }
 
 func stateless() {
-	state.MaxTrieCacheGen = 100000
+	//state.MaxTrieCacheGen = 100000
 	startTime := time.Now()
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
@@ -159,7 +159,7 @@ func stateless() {
 	w := bufio.NewWriter(slFile)
 	defer w.Flush()
 	slt := NewStatelessTracer()
-	vmConfig := vm.Config{Tracer: slt, Debug: true}
+	vmConfig := vm.Config{Tracer: slt, Debug: false}
 	bcb, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFullFaker(), vm.Config{}, nil)
 	check(err)
 	stateDb := ethdb.NewMemDatabase()
@@ -182,11 +182,11 @@ func stateless() {
 			fmt.Printf("Failed on block %d\n", blockNum)
 		}
 		check(err)
-		dbstate := state.NewDbState(ethDb, block.NumberU64()-1)
+		masks, shortLens, hashes := bc.GetTrieDbState().ExtractProofs()
+		dbstate := state.NewStateless(block.Root(), masks, shortLens, hashes, block.NumberU64()-1)
 
-		// First pass - execute transactions in sequence
 		statedb := state.New(dbstate)
-		statedb.SetTracer(slt)
+		//statedb.SetTracer(slt)
 		signer := types.MakeSigner(chainConfig, block.Number())
 		slt.ResetCounters()
 		slt.ResetSets()
@@ -197,9 +197,10 @@ func stateless() {
 			// Not yet the searched for transaction, execute on top of the current state
 			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
 			if _, _, _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
-				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
+				//panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
 			}
 		}
+		/*
 		ps := &ProofSizer{ethDb: bc.GetTrieDbState().Database()}
 		for account := range slt.accountsReadSet {
 			ps.addAccount(account)
@@ -219,7 +220,11 @@ func stateless() {
 		}
 
 		fmt.Fprintf(w, "%d,%d,%d\n", blockNum, len(slt.accountsWriteSet), len(slt.storageWriteSet))
+		*/
 		blockNum++
+		if blockNum == 10 {
+			break
+		}
 		if blockNum % 1000 == 0 {
 			fmt.Printf("Processed %d blocks\n", blockNum)
 		}

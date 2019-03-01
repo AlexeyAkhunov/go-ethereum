@@ -65,6 +65,9 @@ type Trie struct {
 	resolveReads    bool
 	joinGeneration  func(gen uint64)
 	leftGeneration  func(gen uint64)
+	addProof        func(prefix, key []byte, pos int, mask uint32)
+	addValue        func(prefix, key []byte, pos int, value []byte)
+	addShort        func(prefix, key []byte, pos int, short []byte)
 }
 
 func (t *Trie) PrintTrie() {
@@ -90,11 +93,29 @@ func New(root common.Hash, bucket []byte, prefix []byte, encodeToBytes bool) *Tr
 		accounts: bytes.Equal(bucket, []byte("AT")),
 		joinGeneration: func(uint64) {},
 		leftGeneration: func(uint64) {},
+		addProof: func(prefix, key []byte, pos int, mask uint32) {},
+		addValue: func(prefix, key []byte, pos int, value []byte) {},
+		addShort: func(prefix, key []byte, pos int, short []byte) {},
 	}
 	if (root != common.Hash{}) && root != emptyRoot {
 		rootcopy := make([]byte, len(root[:]))
 		copy(rootcopy, root[:])
 		trie.root = hashNode(rootcopy)
+	}
+	return trie
+}
+
+func NewFromProofs(bucket []byte, prefix []byte, encodeToBytes bool, masks []uint32, shortLens []int, hashes []common.Hash) *Trie {
+	trie := &Trie{
+		bucket: bucket,
+		prefix: prefix,
+		encodeToBytes: encodeToBytes,
+		accounts: bytes.Equal(bucket, []byte("AT")),
+		joinGeneration: func(uint64) {},
+		leftGeneration: func(uint64) {},
+		addProof: func(prefix, key []byte, pos int, mask uint32) {},
+		addValue: func(prefix, key []byte, pos int, value []byte) {},
+		addShort: func(prefix, key []byte, pos int, short []byte) {},
 	}
 	return trie
 }
@@ -110,9 +131,16 @@ func (t *Trie) SetResolveReads(rr bool) {
 	t.resolveReads = rr
 }
 
-func (t *Trie) MakeListed(joinGeneration, leftGeneration func (gen uint64)) {
+func (t *Trie) MakeListed(joinGeneration, leftGeneration func (gen uint64),
+	addProof func(prefix, key []byte, pos int, mask uint32),
+	addValue func(prefix, key []byte, pos int, value []byte),
+	addShort func(prefix, key []byte, pos int, short []byte),
+) {
 	t.joinGeneration = joinGeneration
 	t.leftGeneration = leftGeneration
+	t.addProof = addProof
+	t.addValue = addValue
+	t.addShort = addShort
 }
 
 // NodeIterator returns an iterator that returns nodes of the trie. Iteration starts at
@@ -303,11 +331,13 @@ func (t *Trie) tryGet1(db ethdb.Database, origNode node, key []byte, pos int, bl
 	case nil:
 		return nil, true
 	case valueNode:
+		t.addValue(t.prefix, key, pos, []byte(n))
 		return n, true
 	case *shortNode:
 		n.updateT(blockNr, t.joinGeneration, t.leftGeneration)
 		var adjust bool
 		nKey := compactToHex(n.Key)
+		t.addShort(t.prefix, key, pos, nKey)
 		if len(key)-pos < len(nKey) || !bytes.Equal(nKey, key[pos:pos+len(nKey)]) {
 			adjust = false
 			value, gotValue = nil, true
@@ -320,6 +350,7 @@ func (t *Trie) tryGet1(db ethdb.Database, origNode node, key []byte, pos int, bl
 		}
 		return
 	case *duoNode:
+		t.addProof(t.prefix, key, pos, n.mask &^ (uint32(1) << key[pos]))
 		n.updateT(blockNr, t.joinGeneration, t.leftGeneration)
 		var adjust bool
 		i1, i2 := n.childrenIdx()
@@ -339,6 +370,7 @@ func (t *Trie) tryGet1(db ethdb.Database, origNode node, key []byte, pos int, bl
 		}
 		return
 	case *fullNode:
+		t.addProof(t.prefix, key, pos, n.mask() &^ (uint32(1) << key[pos]))
 		n.updateT(blockNr, t.joinGeneration, t.leftGeneration)
 		child := n.Children[key[pos]]
 		adjust := child != nil && n.tod(blockNr) == child.tod(blockNr)
@@ -425,6 +457,138 @@ func (t *Trie) Print(w io.Writer) {
 		t.root.print(w)
 	}
 	fmt.Fprintf(w, "\n")
+}
+
+// Fills in the hashes for the proofs
+func (t *Trie) ExtractProofs(masks []uint32, shortLens []int, db ethdb.Database, blockNr uint64) []common.Hash {
+	var hashes []common.Hash
+	var si int // index in the shortLens
+	keyStack := [][]byte{[]byte{}}
+	nodeStack := []node{t.root}
+	top := 1
+	pos := 0
+	for _, fullMask := range masks {
+		top--
+		n := nodeStack[top]
+		nodeStack[top] = nil
+		key := keyStack[top]
+		keyStack[top] = nil
+		mask := fullMask & 0xffff
+		downmask := fullMask >> 16
+		fmt.Printf("mask: %16b, downmask: %16b, key: %x\n", mask, downmask, key)
+		if mask == 0 {
+			// short node (leaf or extension)
+			if len(key) + shortLens[si] < 65 {
+				s := n.(*shortNode)
+				sKey := compactToHex(s.Key)
+				child := s.Val
+				var err error
+				if nhash, ok := child.(hashNode); ok {
+					child, err = t.resolveHash(db, nhash, key, pos, blockNr)
+					if err != nil {
+						panic(err)
+					}
+				}
+				newkey := append(common.CopyBytes(key), sKey...)
+				if top == len(nodeStack) {
+					nodeStack = append(nodeStack, child)
+					keyStack = append(keyStack, newkey)
+				} else {
+					nodeStack[top] = child
+					keyStack[top] = newkey
+				}
+				top++
+			}
+			si++
+		} else {
+			if f, ok := n.(*fullNode); ok {
+				for nibble := byte(0); nibble < 16; nibble++ {
+					if (mask & (uint32(1) << nibble)) != 0 {
+						hashes = append(hashes, common.BytesToHash(f.Children[nibble].hash()))
+					}
+				}
+			} else {
+				d := n.(*duoNode)
+				i1, i2 := d.childrenIdx()
+				if (mask & (uint32(1) << i1)) != 0 {
+					hashes = append(hashes, common.BytesToHash(d.child1.hash()))
+				}
+				if (mask & (uint32(1) << i2)) != 0 {
+					hashes = append(hashes, common.BytesToHash(d.child2.hash()))
+				}
+			}
+		}
+		if downmask == 0 {
+
+		} else {
+			if f, ok := n.(*fullNode); ok {
+				for cNibble := byte(0); cNibble < 16; cNibble++ {
+					nibble := byte(15) - cNibble
+					if downmask & (uint32(1) << nibble) != 0 {
+						child := f.Children[nibble]
+						var err error
+						if nhash, ok := child.(hashNode); ok {
+							child, err = t.resolveHash(db, nhash, key, pos, blockNr)
+							if err != nil {
+								panic(err)
+							}
+						}
+						newkey := append(common.CopyBytes(key), nibble)
+						if top == len(nodeStack) {
+							nodeStack = append(nodeStack, child)
+							keyStack = append(keyStack, newkey)
+						} else {
+							nodeStack[top] = child
+							keyStack[top] = newkey
+						}
+						top++
+					}
+				}
+			} else {
+				d := n.(*duoNode)
+				i1, i2 := d.childrenIdx()
+				if downmask & (uint32(1) << i2) != 0 {
+					child := d.child2
+					var err error
+					if nhash, ok := child.(hashNode); ok {
+						child, err = t.resolveHash(db, nhash, key, pos, blockNr)
+						if err != nil {
+							panic(err)
+						}
+					}
+					newkey := append(common.CopyBytes(key), byte(i2))
+					if top == len(nodeStack) {
+						nodeStack = append(nodeStack, child)
+						keyStack = append(keyStack, newkey)
+					} else {
+						nodeStack[top] = child
+						keyStack[top] = newkey
+					}
+					top++
+				}
+				if downmask & (uint32(1) << i1) != 0 {
+					child := d.child1
+					var err error
+					if nhash, ok := child.(hashNode); ok {
+						child, err = t.resolveHash(db, nhash, key, pos, blockNr)
+						if err != nil {
+							panic(err)
+						}
+					}
+					newkey := append(common.CopyBytes(key), byte(i1))
+					if top == len(nodeStack) {
+						nodeStack = append(nodeStack, child)
+						keyStack = append(keyStack, newkey)
+					} else {
+						nodeStack[top] = child
+						keyStack[top] = newkey
+					}
+					top++
+				}
+			}
+		}
+	}
+	return hashes
 }
 
 func loadNode(br *bufio.Reader) (node, error) {
@@ -655,6 +819,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieCon
 	case *shortNode:
 		n.updateT(blockNr, t.joinGeneration, t.leftGeneration)
 		nKey := compactToHex(n.Key)
+		t.addShort(t.prefix, key, pos, nKey)
 		matchlen := prefixLen(key[pos:], nKey)
 		// If the whole key matches, keep this short node as is
 		// and only update the value.
@@ -705,6 +870,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieCon
 		return done
 
 	case *duoNode:
+		t.addProof(t.prefix, key, pos, n.mask &^ (uint32(1) << key[pos]))
 		n.updateT(blockNr, t.joinGeneration, t.leftGeneration)
 		var done bool
 		var adjust bool
@@ -750,6 +916,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieCon
 		return done
 
 	case *fullNode:
+		t.addProof(t.prefix, key, pos, n.mask() &^ (uint32(1) << key[pos]))
 		n.updateT(blockNr, t.joinGeneration, t.leftGeneration)
 		child := n.Children[key[pos]]
 		adjust := child != nil && n.tod(blockNr) == child.tod(blockNr)
@@ -877,6 +1044,17 @@ func (t *Trie) convertToShortNode(key []byte, keyStart int, child node, pos uint
 			// cnode gets removed, but newshort gets added
 			c.updated = true
 			c.n = newshort
+			if done {
+				t.addShort(t.prefix, key, keyStart, k)
+				proofKey := make([]byte, len(key))
+				copy(proofKey, key[:keyStart])
+				copy(proofKey[keyStart:], k)
+				if v, isValue := newshort.Val.(valueNode); isValue {
+					t.addValue(t.prefix, proofKey, keyStart+len(k), v)
+				} else {
+					t.addProof(t.prefix, proofKey, keyStart+len(k), uint32(0))
+				}
+			}
 			return done
 		}
 	}
@@ -889,6 +1067,17 @@ func (t *Trie) convertToShortNode(key []byte, keyStart int, child node, pos uint
 	newshort.adjustTod(blockNr)
 	c.updated = true
 	c.n = newshort
+	if done {
+		t.addShort(t.prefix, key, keyStart, []byte{byte(pos)})
+		proofKey := make([]byte, len(key))
+		copy(proofKey, key[:keyStart])
+		proofKey[keyStart] = byte(pos)
+		if v, isValue := newshort.Val.(valueNode); isValue {
+			t.addValue(t.prefix, proofKey, keyStart+1, v)
+		} else {
+			t.addProof(t.prefix, proofKey, keyStart+1, uint32(0))
+		}
+	}
 	return done
 }
 
@@ -902,6 +1091,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, c *TrieContinuati
 		n.updateT(blockNr, t.joinGeneration, t.leftGeneration)
 		var done bool
 		nKey := compactToHex(n.Key)
+		t.addShort(t.prefix, key, keyStart, nKey)
 		matchlen := prefixLen(key[keyStart:], nKey)
 		if matchlen < len(nKey) {
 			c.updated = false
@@ -957,6 +1147,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, c *TrieContinuati
 		return done
 
 	case *duoNode:
+		t.addProof(t.prefix, key, keyStart, n.mask &^ (uint32(1) << key[keyStart]))
 		n.updateT(blockNr, t.joinGeneration, t.leftGeneration)
 		var done bool
 		var adjust bool
@@ -1029,6 +1220,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, c *TrieContinuati
 		return done
 
 	case *fullNode:
+		t.addProof(t.prefix, key, keyStart, n.mask() &^ (uint32(1) << key[keyStart]))
 		n.updateT(blockNr, t.joinGeneration, t.leftGeneration)
 		child := n.Children[key[keyStart]]
 		adjust := child != nil && n.tod(blockNr) == child.tod(blockNr)

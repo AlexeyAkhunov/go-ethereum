@@ -111,6 +111,16 @@ func (n *fullNode) copy() *fullNode   {
 	return &c
 }
 
+func (n *fullNode) mask() uint32 {
+	var m uint32
+	for i, child := range n.Children {
+		if child != nil {
+			m |= (uint32(1)<<uint(i))
+		}
+	}
+	return m
+}
+
 func (n *fullNode) duoCopy() *duoNode {
 	c := duoNode{}
 	first := true
