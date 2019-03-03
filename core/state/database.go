@@ -110,61 +110,6 @@ func (a *storageItem) Less(b llrb.Item) bool {
 	return bytes.Compare(a.seckey[:], bi.seckey[:]) < 0
 }
 
-/* Proof Of Concept for verification of Stateless client proofs */
-type Stateless struct {
-	stateRoot common.Hash
-	masks []uint32
-	shortLens []int
-	hashes []common.Hash
-	blockNr uint64
-}
-
-func NewStateless(stateRoot common.Hash, masks []uint32, shortLens []int, hashes []common.Hash, blockNr uint64) *Stateless {
-	return &Stateless {
-		stateRoot: stateRoot,
-		masks: masks,
-		shortLens: shortLens,
-		hashes: hashes,
-		blockNr: blockNr,
-	}
-}
-
-func (s *Stateless) SetBlockNr(blockNr uint64) {
-	s.blockNr = blockNr
-}
-
-func (s *Stateless) ReadAccountData(address common.Address) (*Account, error) {
-	return nil, nil
-}
-
-func (s *Stateless) ReadAccountStorage(address common.Address, key *common.Hash) ([]byte, error) {
-	return nil, nil
-}
-
-func (s *Stateless) ReadAccountCode(codeHash common.Hash) ([]byte, error) {
-	return nil, nil
-}
-
-func (s *Stateless) ReadAccountCodeSize(codeHash common.Hash) (int, error) {
-	return 0, nil
-}
-
-func (s *Stateless) UpdateAccountData(address common.Address, original, account *Account) error {
-	return nil
-}
-
-func (s *Stateless) UpdateAccountCode(codeHash common.Hash, code []byte) error {
-	return nil
-}
-
-func (s *Stateless) DeleteAccount(address common.Address, original *Account) error {
-	return nil
-}
-
-func (s *Stateless) WriteAccountStorage(address common.Address, key, original, value *common.Hash) error {
-	return nil
-}
-
 // Implements StateReader by wrapping database only, without trie
 type DbState struct {
 	db ethdb.Getter
@@ -633,7 +578,7 @@ func (rds *RepairDbState) getStorageTrie(address common.Address, create bool) (*
 		} else {
 			t = trie.New(account.Root, StorageBucket, address[:], true)
 		}
-		t.MakeListed(rds.joinGeneration, rds.leftGeneration, rds.addProof, rds.addValue, rds.addShort)
+		t.MakeListed(rds.joinGeneration, rds.leftGeneration, rds.addReadProof, rds.addWriteProof, rds.addValue, rds.addShort)
 		rds.storageTries[address] = t
 	}
 	return t, nil
@@ -823,7 +768,10 @@ func (rds *RepairDbState) leftGeneration(gen uint64) {
 	rds.generationCounts[gen]--
 }
 
-func (rds *RepairDbState) addProof(prefix, key []byte, pos int, mask uint32) {
+func (rds *RepairDbState) addReadProof(prefix, key []byte, pos int, mask uint32, hashes []common.Hash) {
+}
+
+func (rds *RepairDbState) addWriteProof(prefix, key []byte, pos int, mask uint32, hashes []common.Hash) {
 }
 
 func (rds *RepairDbState) addValue(prefix, key []byte, pos int, value []byte) {
@@ -898,9 +846,12 @@ type TrieDbState struct {
 	oldestGeneration uint64
 	noHistory        bool
 	resolveReads     bool
-	proofMasks       map[string]uint32
+	readProofMasks   map[string]uint32
+	readProofHashes  map[string][16]common.Hash
+	//writeProofMasks  map[string]uint32
+	//writeProofHashes map[string][16]common.Hash
 	proofShorts      map[string]string
-	proofValues      map[string][]byte
+	proofValues      [][]byte
 	proofCodes       map[common.Hash]struct{}
 }
 
@@ -922,14 +873,17 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 		storageUpdates: make(map[common.Address]map[common.Hash][]byte),
 		accountUpdates: make(map[common.Hash]*Account),
 		deleted: make(map[common.Hash]struct{}),
-		proofMasks: make(map[string]uint32),
+		readProofMasks: make(map[string]uint32),
+		readProofHashes: make(map[string][16]common.Hash),
+		//writeProofMasks: make(map[string]uint32),
+		//writeProofHashes: make(map[string][16]common.Hash),
 		proofShorts: make(map[string]string),
-		proofValues: make(map[string][]byte),
+		//proofValues: make(map[string][]byte),
 		proofCodes: make(map[common.Hash]struct{}),
 		codeCache: cc,
 		codeSizeCache: csc,
 	}
-	t.MakeListed(tds.joinGeneration, tds.leftGeneration, tds.addProof, tds.addValue, tds.addShort)
+	t.MakeListed(tds.joinGeneration, tds.leftGeneration, tds.addReadProof, tds.addWriteProof, tds.addValue, tds.addShort)
 	tds.generationCounts = make(map[uint64]int, 4096)
 	tds.oldestGeneration = blockNr
 	return &tds, nil
@@ -959,9 +913,12 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 		storageUpdates: make(map[common.Address]map[common.Hash][]byte),
 		accountUpdates: make(map[common.Hash]*Account),
 		deleted: make(map[common.Hash]struct{}),
-		proofMasks: make(map[string]uint32),
+		readProofMasks: make(map[string]uint32),
+		readProofHashes: make(map[string][16]common.Hash),
+		//writeProofMasks: make(map[string]uint32),
+		//writeProofHashes: make(map[string][16]common.Hash),
 		proofShorts: make(map[string]string),
-		proofValues: make(map[string][]byte),
+		//proofValues: make(map[string][]byte),
 		proofCodes: make(map[common.Hash]struct{}),
 	}
 	return &cpy
@@ -981,46 +938,105 @@ func (tds *TrieDbState) TrieRoot() (common.Hash, error) {
 	return root, err
 }
 
-func (tds *TrieDbState) ExtractProofs() (masks []uint32, shortLens []int, hashes []common.Hash) {
+func (tds *TrieDbState) ExtractProofs() (masks []uint32, hashes []common.Hash, shortLens []int, values [][]byte) {
 	fmt.Printf("Extracting proofs for block %d\n", tds.blockNr)
 	// Collect all the strings
 	keys := []string{}
 	keySet := make(map[string]struct{})
 	storageKeys := []string{}
 	storageKeySet := make(map[string]struct{})
-	for key := range tds.proofMasks {
+	for key := range tds.readProofMasks {
 		if len(key) <= 65 {
-			keys = append(keys, key)
-			keySet[key] = struct{}{}
+			if _, ok := keySet[key]; !ok {	
+				keys = append(keys, key)
+				keySet[key] = struct{}{}
+			}
 		} else {
-			storageKeys = append(storageKeys, key)
-			storageKeySet[key] = struct{}{}
+			if _, ok := storageKeySet[key]; !ok {	
+				storageKeys = append(storageKeys, key)
+				storageKeySet[key] = struct{}{}
+			}
 		}
 	}
+	/*
+	for key := range tds.writeProofMasks {
+		if len(key) <= 65 {
+			if _, ok := keySet[key]; !ok {	
+				keys = append(keys, key)
+				keySet[key] = struct{}{}
+			}
+		} else {
+			if _, ok := storageKeySet[key]; !ok {	
+				storageKeys = append(storageKeys, key)
+				storageKeySet[key] = struct{}{}
+			}
+		}
+	}
+	*/
 	for key := range tds.proofShorts {
 		if len(key) <= 65 {
-			keys = append(keys, key)
-			keySet[key] = struct{}{}
+			if _, ok := keySet[key]; !ok {	
+				keys = append(keys, key)
+				keySet[key] = struct{}{}
+			}
 		} else {
-			storageKeys = append(storageKeys, key)
-			storageKeySet[key] = struct{}{}
+			if _, ok := storageKeySet[key]; !ok {	
+				storageKeys = append(storageKeys, key)
+				storageKeySet[key] = struct{}{}
+			}
 		}
 	}
+	/*
 	for key := range tds.proofValues {
 		if len(key) <= 65 {
-			keys = append(keys, key)
-			keySet[key] = struct{}{}
+			if _, ok := keySet[key]; !ok {	
+				keys = append(keys, key)
+				keySet[key] = struct{}{}
+			}
 		} else {
-			storageKeys = append(storageKeys, key)
-			storageKeySet[key] = struct{}{}
+			if _, ok := storageKeySet[key]; !ok {	
+				storageKeys = append(storageKeys, key)
+				storageKeySet[key] = struct{}{}
+			}
 		}
 	}
+	*/
 	sort.Strings(keys)
 	for _, key := range keys {
 		fmt.Printf("%x\n", key)
-		if mask, ok := tds.proofMasks[key]; ok {
-			fmt.Printf("Mask %16b\n", mask)
+		var rwMask uint32
+		var maskPresent bool = false
+		var harray [16]common.Hash
+		if mask, ok := tds.readProofMasks[key]; ok {
+			rwMask |= mask
+			h := tds.readProofHashes[key]
+			for i := byte(0); i < 16; i++ {
+				if mask & (uint32(1) << i) != 0 {
+					harray[i] = h[i]
+				}
+			}
+			maskPresent = true
+		}
+		/*
+		if mask, ok := tds.writeProofMasks[key]; ok {
+			rwMask |= mask
+			h := tds.writeProofHashes[key]
+			for i := byte(0); i < 16; i++ {
+				if mask & (uint32(1) << i) != 0 {
+					harray[i] = h[i]
+				}
+			}
+			maskPresent = true
+		}
+		*/
+		if maskPresent {
+			fmt.Printf("Mask %16b\n", rwMask)
 			// Determine the downward mask
+			for i := byte(0); i < 16; i++ {
+				if rwMask & (uint32(1) << i) != 0 {
+					hashes = append(hashes, harray[i])
+				}
+			}
 			var downmask uint32
 			for nibble := byte(0); nibble < 16; nibble++ {
 				if _, ok1 := keySet[key + string(nibble)]; ok1 {
@@ -1028,7 +1044,7 @@ func (tds *TrieDbState) ExtractProofs() (masks []uint32, shortLens []int, hashes
 				}
 			}
 			fmt.Printf("Down %16b\n", downmask)
-			masks = append(masks, mask | (downmask << 16))
+			masks = append(masks, rwMask | (downmask << 16))
 		}
 		if short, ok := tds.proofShorts[key]; ok {
 			fmt.Printf("Short %x\n", short)
@@ -1044,9 +1060,11 @@ func (tds *TrieDbState) ExtractProofs() (masks []uint32, shortLens []int, hashes
 			masks = append(masks, (downmask << 16))
 			shortLens = append(shortLens, len(short))
 		}
+		/*
 		if value, ok := tds.proofValues[key]; ok {
 			fmt.Printf("Value %x\n", value)
 		}
+		*/
 	}
 	fmt.Printf("Masks:")
 	for _, mask := range masks {
@@ -1058,17 +1076,27 @@ func (tds *TrieDbState) ExtractProofs() (masks []uint32, shortLens []int, hashes
 		fmt.Printf(" %d", shortLen)
 	}
 	fmt.Printf("\n")
-	hashes = tds.t.ExtractProofs(masks, shortLens, tds.db, tds.blockNr)
+	//hashes1 := tds.t.ExtractProofs(masks, shortLens, tds.db, tds.blockNr)
 	fmt.Printf("Hashes:")
 	for _, hash := range hashes {
 		fmt.Printf(" %x", hash)
 	}
 	fmt.Printf("\n")
-	tds.proofMasks = make(map[string]uint32)
+	//fmt.Printf("Hashes1:")
+	//for i, hash := range hashes1 {
+	//	if hash != hashes[i] {
+	//		fmt.Printf("  %d: %x!=%x", i, hash, hashes[i])
+	//	}
+	//}
+	//fmt.Printf("\n")
+	tds.readProofMasks = make(map[string]uint32)
+	tds.readProofHashes = make(map[string][16]common.Hash)
+	//tds.writeProofMasks = make(map[string]uint32)
+	//tds.writeProofHashes = make(map[string][16]common.Hash)
 	tds.proofShorts = make(map[string]string)
-	tds.proofValues = make(map[string][]byte)
+	tds.proofValues = nil
 	tds.proofCodes = make(map[common.Hash]struct{})
-	return masks, shortLens, hashes
+	return masks, hashes, shortLens, tds.proofValues
 }
 
 func (tds *TrieDbState) PrintTrie(w io.Writer) {
@@ -1385,16 +1413,73 @@ func (tds *TrieDbState) leftGeneration(gen uint64) {
 	tds.generationCounts[gen]--
 }
 
-func (tds *TrieDbState) addProof(prefix, key []byte, pos int, mask uint32) {
+func (tds *TrieDbState) addReadProof(prefix, key []byte, pos int, mask uint32, hashes []common.Hash) {
 	if tds.resolveReads {
 		k := make([]byte, len(prefix) + pos)
 		copy(k, prefix)
 		copy(k[len(prefix):], key[:pos])
 		ks := string(k)
-		if m, ok := tds.proofMasks[ks]; ok {
-			tds.proofMasks[ks] = m & mask
+		if m, ok := tds.readProofMasks[ks]; ok {
+			intersection := m & mask
+			tds.readProofMasks[ks] = intersection
+			h := tds.readProofHashes[ks]
+			idx := 0
+			for i := byte(0); i < 16; i++ {
+				if intersection & (uint32(1) << i) != 0 {
+					h[i] = hashes[idx]
+					idx++
+				} else {
+					h[i] = common.Hash{}
+				}
+			}
+			tds.readProofHashes[ks] = h
 		} else {
-			tds.proofMasks[ks] = mask
+			tds.readProofMasks[ks] = mask
+			var h [16]common.Hash
+			idx := 0
+			for i := byte(0); i < 16; i++ {
+				if mask & (uint32(1) << i) != 0 {
+					h[i] = hashes[idx]
+					idx++
+				}
+			}
+			tds.readProofHashes[ks] = h
+		}
+	}
+}
+
+func (tds *TrieDbState) addWriteProof(prefix, key []byte, pos int, mask uint32, hashes []common.Hash) {
+	if tds.resolveReads {
+		k := make([]byte, len(prefix) + pos)
+		copy(k, prefix)
+		copy(k[len(prefix):], key[:pos])
+		ks := string(k)
+		if m, ok := tds.readProofMasks[ks]; ok {
+			intersection := m & mask
+			tds.readProofMasks[ks] = intersection
+			h := tds.readProofHashes[ks]
+			idx := 0
+			for i := byte(0); i < 16; i++ {
+				if intersection & (uint32(1) << i) != 0 {
+					h[i] = hashes[idx]
+					idx++
+				} else {
+					h[i] = common.Hash{}
+				}
+			}
+			// Not update
+			//tds.readProofHashes[ks] = h
+		} else {
+			tds.readProofMasks[ks] = mask
+			var h [16]common.Hash
+			idx := 0
+			for i := byte(0); i < 16; i++ {
+				if mask & (uint32(1) << i) != 0 {
+					h[i] = hashes[idx]
+					idx++
+				}
+			}
+			tds.readProofHashes[ks] = h
 		}
 	}
 }
@@ -1404,10 +1489,13 @@ func (tds *TrieDbState) addValue(prefix, key []byte, pos int, value []byte) {
 		k := make([]byte, len(prefix) + pos)
 		copy(k, prefix)
 		copy(k[len(prefix):], key[:pos])
-		ks := string(k)
+		//ks := string(k)
+		tds.proofValues = append(tds.proofValues, value)
+		/*
 		if _, ok := tds.proofValues[ks]; !ok {
 			tds.proofValues[string(k)] = value
 		}
+		*/
 	}
 }
 
@@ -1483,7 +1571,7 @@ func (tds *TrieDbState) getStorageTrie(address common.Address, addrHash common.H
 		}
 		t.SetHistorical(tds.historical)
 		t.SetResolveReads(tds.resolveReads)
-		t.MakeListed(tds.joinGeneration, tds.leftGeneration, tds.addProof, tds.addValue, tds.addShort)
+		t.MakeListed(tds.joinGeneration, tds.leftGeneration, tds.addReadProof, tds.addWriteProof, tds.addValue, tds.addShort)
 		tds.storageTries[addrHash] = t
 	}
 	return t, nil

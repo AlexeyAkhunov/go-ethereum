@@ -149,11 +149,13 @@ func stateless() {
 		interruptCh <- true
 	}()
 
-	ethDb, err := ethdb.NewLDBDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
+	//ethDb, err := ethdb.NewLDBDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
+	ethDb, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	check(err)
 	defer ethDb.Close()
 	chainConfig := params.MainnetChainConfig
-	slFile, err := os.OpenFile("/Volumes/tb4/turbo-geth/stateless.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	//slFile, err := os.OpenFile("/Volumes/tb4/turbo-geth/stateless.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	slFile, err := os.OpenFile("stateless.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	check(err)
 	defer slFile.Close()
 	w := bufio.NewWriter(slFile)
@@ -182,8 +184,8 @@ func stateless() {
 			fmt.Printf("Failed on block %d\n", blockNum)
 		}
 		check(err)
-		masks, shortLens, hashes := bc.GetTrieDbState().ExtractProofs()
-		dbstate := state.NewStateless(block.Root(), masks, shortLens, hashes, block.NumberU64()-1)
+		masks, hashes, shortLens, values := bc.GetTrieDbState().ExtractProofs()
+		dbstate := state.NewStateless(block.Root(), masks, hashes, shortLens, values, block.NumberU64()-1)
 
 		statedb := state.New(dbstate)
 		//statedb.SetTracer(slt)

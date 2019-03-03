@@ -121,6 +121,16 @@ func (n *fullNode) mask() uint32 {
 	return m
 }
 
+func (n *fullNode) hashesExcept(idx byte) []common.Hash {
+	hashes := []common.Hash{}
+	for i, child := range n.Children {
+		if child != nil && i != int(idx) {
+			hashes = append(hashes, common.BytesToHash(child.hash()))
+		}
+	}
+	return hashes
+}
+
 func (n *fullNode) duoCopy() *duoNode {
 	c := duoNode{}
 	first := true
@@ -143,6 +153,18 @@ func (n *fullNode) duoCopy() *duoNode {
 	}
 	c.flags.dirty = n.flags.dirty
 	return &c
+}
+
+func (n *duoNode) hashesExcept(idx byte) []common.Hash {
+	i1, i2 := n.childrenIdx()
+	switch idx {
+	case i1:
+		return []common.Hash{common.BytesToHash(n.child2.hash())}
+	case i2:
+		return []common.Hash{common.BytesToHash(n.child2.hash())}
+	default:
+		return []common.Hash{common.BytesToHash(n.child2.hash()), common.BytesToHash(n.child2.hash())}
+	}
 }
 
 func (n *duoNode) copy() *duoNode {
