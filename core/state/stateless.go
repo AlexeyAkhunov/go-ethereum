@@ -13,6 +13,7 @@ type Stateless struct {
 	shortLens []int
 	values [][]byte
 	blockNr uint64
+	valueIdx int // Current value index
 }
 
 func NewStateless(stateRoot common.Hash, masks []uint32, hashes []common.Hash, shortLens []int, values [][]byte, blockNr uint64) *Stateless {
