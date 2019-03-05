@@ -758,7 +758,18 @@ func (tc *TrieContinuation) RunWithDb(db ethdb.Database, blockNr uint64) bool {
 	tc.updated = false
 	switch tc.action {
 	case TrieActionInsert:
-		done = tc.t.insert(tc.t.root, tc.key, 0, tc.value, tc, blockNr)
+		if tc.t.root == nil {
+			newnode := &shortNode{Key: hexToCompact(tc.key[:]), Val: tc.value}
+			newnode.flags.dirty = true
+			newnode.flags.t = blockNr
+			newnode.adjustTod(blockNr)
+			tc.t.joinGeneration(blockNr)
+			tc.n = newnode
+			tc.updated = true
+			done = true
+		} else {
+			done = tc.t.insert(tc.t.root, tc.key, 0, tc.value, tc, blockNr)
+		}
 	case TrieActionDelete:
 		done = tc.t.delete(tc.t.root, tc.key, 0, tc, blockNr)
 	}
@@ -845,6 +856,9 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieCon
 		// and only update the value.
 		var done bool
 		if matchlen == len(nKey) {
+			if t.resolveReads {
+				fmt.Printf("Short node value change\n")
+			}
 			done = t.insert(n.Val, key, pos+matchlen, value, c, blockNr)
 			if c.updated {
 				n.Val = c.n
@@ -853,12 +867,32 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieCon
 			c.n = n
 			n.adjustTod(blockNr)
 		} else {
+			if t.resolveReads {
+				fmt.Printf("Short node -> branch\n")
+			}
 			// Otherwise branch out at the index where they differ.
-			var c1, c2 node
-			t.insert(nil, nKey, matchlen+1, n.Val, c, blockNr) // Value already exists
-			c1 = c.n
-			t.insert(nil, key, pos+matchlen+1, value, c, blockNr)
-			c2 = c.n
+			var c1 node
+			if len(nKey) == matchlen+1 {
+				c1 = n.Val
+			} else {
+				s1 := &shortNode{Key: hexToCompact(nKey[matchlen+1:]), Val: n.Val}
+				s1.flags.dirty = true
+				s1.flags.t = blockNr
+				s1.adjustTod(blockNr)
+				c1 = s1
+				t.joinGeneration(blockNr)
+			}
+			var c2 node
+			if len(key) == pos+matchlen+1 {
+				c2 = value
+			} else {
+				s2 := &shortNode{Key: hexToCompact(key[pos+matchlen+1:]), Val: value}
+				s2.flags.dirty = true
+				s2.flags.t = blockNr
+				s2.adjustTod(blockNr)
+				c2 = s2
+				t.joinGeneration(blockNr)
+			}
 			branch := &duoNode{}
 			if nKey[matchlen] < key[pos+matchlen] {
 				branch.child1 = c1
@@ -900,37 +934,75 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieCon
 		switch key[pos] {
 		case i1:
 			adjust = n.child1 != nil && n.tod(blockNr) == n.child1.tod(blockNr)
-			done = t.insert(n.child1, key, pos+1, value, c, blockNr)
-			if c.updated {
-				n.child1 = c.n
+			if n.child1 == nil {
+				if len(key) == pos+1 {
+					n.child1 = value
+				} else {
+					short := &shortNode{Key: hexToCompact(key[pos+1:]), Val: value}
+					short.flags.dirty = true
+					short.flags.t = blockNr
+					short.adjustTod(blockNr)
+					t.joinGeneration(blockNr)
+					n.child1 = short
+				}
+				c.updated = true
 				n.flags.dirty = true
+				done = true
+			} else {
+				done = t.insert(n.child1, key, pos+1, value, c, blockNr)
+				if c.updated {
+					n.child1 = c.n
+					n.flags.dirty = true
+				}
 			}
 			c.n = n
 		case i2:
 			adjust = n.child2 != nil && n.tod(blockNr) == n.child2.tod(blockNr)
-			done = t.insert(n.child2, key, pos+1, value, c, blockNr)
-			if c.updated {
-				n.child2 = c.n
+			if n.child2 == nil {
+				if len(key) == pos+1 {
+					n.child2 = value
+				} else {
+					short := &shortNode{Key: hexToCompact(key[pos+1:]), Val: value}
+					short.flags.dirty = true
+					short.flags.t = blockNr
+					short.adjustTod(blockNr)
+					t.joinGeneration(blockNr)
+					n.child2 = short
+				}
+				c.updated = true
 				n.flags.dirty = true
+				done = true
+			} else {
+				done = t.insert(n.child2, key, pos+1, value, c, blockNr)
+				if c.updated {
+					n.child2 = c.n
+					n.flags.dirty = true
+				}
 			}
 			c.n = n
 		default:
-			adjust = true
-			done = t.insert(nil, key, pos+1, value, c, blockNr)
-			if !c.updated {
-				c.n = n
+			var child node
+			if len(key) == pos+1 {
+				child = value
 			} else {
-				newnode := &fullNode{}
-				newnode.Children[i1] = n.child1
-				newnode.Children[i2] = n.child2
-				newnode.flags.dirty = true
-				newnode.flags.t = blockNr
-				newnode.adjustTod(blockNr)
-				adjust = false
-				newnode.Children[key[pos]] = c.n
-				c.updated = true
-				c.n = newnode // current node leaves the generation but newnode joins it
+				short := &shortNode{Key: hexToCompact(key[pos+1:]), Val: value}
+				short.flags.dirty = true
+				short.flags.t = blockNr
+				short.adjustTod(blockNr)
+				t.joinGeneration(blockNr)
+				child = short
 			}
+			newnode := &fullNode{}
+			newnode.Children[i1] = n.child1
+			newnode.Children[i2] = n.child2
+			newnode.flags.dirty = true
+			newnode.flags.t = blockNr
+			newnode.adjustTod(blockNr)
+			adjust = false
+			newnode.Children[key[pos]] = child
+			c.updated = true
+			c.n = newnode // current node leaves the generation but newnode joins it
+			done = true
 		}
 		if adjust {
 			n.adjustTod(blockNr)
@@ -944,18 +1016,41 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieCon
 		n.updateT(blockNr, t.joinGeneration, t.leftGeneration)
 		child := n.Children[key[pos]]
 		adjust := child != nil && n.tod(blockNr) == child.tod(blockNr)
-		done := t.insert(child, key, pos+1, value, c, blockNr)
-		if c.updated {
-			n.Children[key[pos]] = c.n
+		var done bool
+		if child == nil {
+			if len(key) == pos+1 {
+				n.Children[key[pos]] = value
+			} else {
+				short := &shortNode{Key: hexToCompact(key[pos+1:]), Val: value}
+				short.flags.dirty = true
+				short.flags.t = blockNr
+				short.adjustTod(blockNr)
+				t.joinGeneration(blockNr)
+				n.Children[key[pos]] = short
+			}
+			c.updated = true
 			n.flags.dirty = true
+			done = true
+		} else {
+			done = t.insert(child, key, pos+1, value, c, blockNr)
+			if c.updated {
+				n.Children[key[pos]] = c.n
+				n.flags.dirty = true
+			}
 		}
 		c.n = n
 		if adjust {
 			n.adjustTod(blockNr)
 		}
 		return done
-
+/*
 	case nil:
+		if t.resolveReads {
+			fmt.Printf("nil node insert\n")
+		}
+		if t.resolveReads {
+			t.addValue(t.prefix, key, pos, nil)
+		}
 		newnode := &shortNode{Key: hexToCompact(key[pos:])}
 		newnode.Val = value
 		newnode.flags.dirty = true
@@ -965,7 +1060,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieCon
 		c.updated = true
 		c.n = newnode
 		return true
-
+*/
 	case hashNode:
 		var done bool
 		// We've hit a part of the trie that isn't loaded yet. Load

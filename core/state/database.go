@@ -374,6 +374,16 @@ func (tds *TrieDbState) ExtractProofs() (masks []uint32, hashes []common.Hash, s
 		fmt.Printf(" %x", hash)
 	}
 	fmt.Printf("\n")
+	values = tds.proofValues
+	fmt.Printf("Values:")
+	for _, value := range values {
+		if value == nil {
+			fmt.Printf(" nil")
+		} else {
+			fmt.Printf(" %x", value)
+		}
+	}
+	fmt.Printf("\n")
 	//fmt.Printf("Hashes1:")
 	//for i, hash := range hashes1 {
 	//	if hash != hashes[i] {
@@ -388,7 +398,7 @@ func (tds *TrieDbState) ExtractProofs() (masks []uint32, hashes []common.Hash, s
 	tds.proofShorts = make(map[string]string)
 	tds.proofValues = nil
 	tds.proofCodes = make(map[common.Hash]struct{})
-	return masks, hashes, shortLens, tds.proofValues
+	return masks, hashes, shortLens, values
 }
 
 func (tds *TrieDbState) PrintTrie(w io.Writer) {

@@ -162,13 +162,14 @@ func stateless() {
 	defer w.Flush()
 	slt := NewStatelessTracer()
 	vmConfig := vm.Config{Tracer: slt, Debug: false}
-	bcb, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFullFaker(), vm.Config{}, nil)
+	engine := ethash.NewFullFaker()
+	bcb, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vm.Config{}, nil)
 	check(err)
 	stateDb := ethdb.NewMemDatabase()
 	defer stateDb.Close()
 	_, _, _, err = core.SetupGenesisBlock(stateDb, core.DefaultGenesisBlock())
 	check(err)
-	bc, err := core.NewBlockChain(stateDb, nil, chainConfig, ethash.NewFullFaker(), vmConfig, nil)
+	bc, err := core.NewBlockChain(stateDb, nil, chainConfig, engine, vmConfig, nil)
 	check(err)
 	bc.SetNoHistory(true)
 	bc.SetResolveReads(true)
@@ -189,18 +190,32 @@ func stateless() {
 
 		statedb := state.New(dbstate)
 		//statedb.SetTracer(slt)
-		signer := types.MakeSigner(chainConfig, block.Number())
+		//signer := types.MakeSigner(chainConfig, block.Number())
 		slt.ResetCounters()
 		slt.ResetSets()
+		gp := new(core.GasPool).AddGas(block.GasLimit())
+		header := block.Header()
+		usedGas := new(uint64)
+		var receipts types.Receipts
 		for _, tx := range block.Transactions() {
 			// Assemble the transaction call message and return if the requested offset
-			msg, _ := tx.AsMessage(signer)
-			context := core.NewEVMContext(msg, block.Header(), bc, nil)
+			//msg, _ := tx.AsMessage(signer)
+			//context := core.NewEVMContext(msg, block.Header(), bc, nil)
 			// Not yet the searched for transaction, execute on top of the current state
-			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
-			if _, _, _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
-				//panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
+			//vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
+			receipt, _, err := core.ApplyTransaction(chainConfig, bcb, nil, gp, statedb, state.NewNoopWriter(), header, tx, usedGas, vmConfig)
+			if err != nil {
+				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
 			}
+			receipts = append(receipts, receipt)
+			//if _, _, _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
+			//	panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
+			//}
+		}
+		// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
+		_, err := engine.Finalize(bcb, header, statedb, block.Transactions(), block.Uncles(), receipts)
+		if err != nil {
+			panic(fmt.Errorf("Finalize of block %d failed: %v", blockNum, err))
 		}
 		/*
 		ps := &ProofSizer{ethDb: bc.GetTrieDbState().Database()}
