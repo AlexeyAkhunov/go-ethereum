@@ -70,7 +70,7 @@ func stateless() {
 			fmt.Printf("Failed on block %d\n", blockNum)
 		}
 		check(err)
-		trace := false
+		trace := blockNum == 148
 		masks, hashes, shortKeys, values := bc.GetTrieDbState().ExtractProofs(trace)
 		dbstate, err := state.NewStateless(preRoot, masks, hashes, shortKeys, values, block.NumberU64()-1, trace)
 		if err != nil {
@@ -123,12 +123,12 @@ func stateless() {
 		fmt.Fprintf(w, "%d,%d,%d\n", blockNum, len(slt.accountsWriteSet), len(slt.storageWriteSet))
 		*/
 		blockNum++
-		if blockNum == 10 {
+		if blockNum == 1000 {
 			break
 		}
-		if blockNum % 1000 == 0 {
+		//if blockNum % 1000 == 0 {
 			fmt.Printf("Processed %d blocks\n", blockNum)
-		}
+		//}
 		// Check for interrupts
 		select {
 		case interrupt = <-interruptCh:

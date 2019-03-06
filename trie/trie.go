@@ -814,10 +814,11 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieCon
 		} else {
 			// Otherwise branch out at the index where they differ.
 			if t.resolveReads {
+				fmt.Printf("Short to duo, val type %T\n", n.Val)
 				if v, ok := n.Val.(valueNode); ok {
 					t.addValue(t.prefix, key, pos+matchlen, v)
 				} else {
-					t.addProof(t.prefix, key, pos+matchlen, uint32(0), []common.Hash{common.BytesToHash(n.Val.hash())})
+					//t.addProof(t.prefix, key, pos+matchlen, uint32(0), []common.Hash{common.BytesToHash(n.Val.hash())})
 				}
 			}
 			var c1 node
