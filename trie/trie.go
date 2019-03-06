@@ -342,6 +342,9 @@ func (t *Trie) saveFullHash(db ethdb.Database, n node, level int, hashIdx uint32
 }
 
 func (t *Trie) saveHashes(db ethdb.Database, n node, level int, index uint32, h *hasher, blockNr uint64) {
+	if db == nil {
+		return
+	}
 	switch n := (n).(type) {
 	case *shortNode:
 		if n.flags.t < blockNr {

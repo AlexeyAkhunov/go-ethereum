@@ -74,12 +74,13 @@ func stateless() {
 		masks, hashes, shortKeys, values := bc.GetTrieDbState().ExtractProofs(trace)
 		dbstate, err := state.NewStateless(preRoot, masks, hashes, shortKeys, values, block.NumberU64()-1, trace)
 		if err != nil {
-			filename := fmt.Sprintf("right_%d.txt", blockNum)
+			filename := fmt.Sprintf("right_%d.txt", blockNum-1)
 			f, err := os.Create(filename)
 			if err == nil {
 				defer f.Close()
 				bc.GetTrieDbState().PrintTrie(f)
 			}
+			panic(err)
 		}
 		statedb := state.New(dbstate)
 		gp := new(core.GasPool).AddGas(block.GasLimit())
@@ -105,6 +106,17 @@ func stateless() {
 		_, err = engine.Finalize(bcb, header, statedb, block.Transactions(), block.Uncles(), receipts)
 		if err != nil {
 			panic(fmt.Errorf("Finalize of block %d failed: %v", blockNum, err))
+		}
+		statedb.Commit(chainConfig.IsEIP158(header.Number), dbstate)
+		err = dbstate.CheckRoot(header.Root)
+		if err != nil {
+			filename := fmt.Sprintf("right_%d.txt", blockNum)
+			f, err := os.Create(filename)
+			if err == nil {
+				defer f.Close()
+				bc.GetTrieDbState().PrintTrie(f)
+			}
+			panic(err)
 		}
 		preRoot = header.Root
 		/*

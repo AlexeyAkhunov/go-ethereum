@@ -21,6 +21,7 @@ import (
 	"os"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie"
 )
 
@@ -32,7 +33,7 @@ type Stateless struct {
 	shortKeys [][]byte
 	values [][]byte
 	blockNr uint64
-	trie *trie.Trie
+	t *trie.Trie
 }
 
 func NewStateless(stateRoot common.Hash,
@@ -43,15 +44,15 @@ func NewStateless(stateRoot common.Hash,
 	blockNr uint64,
 	trace bool,
 ) (*Stateless, error) {
-	trie := trie.NewFromProofs(AccountsBucket, nil, false, masks, shortKeys, values, hashes, trace)
-	if stateRoot != trie.Hash() {
-		filename := fmt.Sprintf("root_%d.txt", blockNr)
+	t := trie.NewFromProofs(AccountsBucket, nil, false, masks, shortKeys, values, hashes, trace)
+	if stateRoot != t.Hash() {
+		filename := fmt.Sprintf("root_%d.txt", blockNr-1)
 		f, err := os.Create(filename)
 		if err == nil {
 			defer f.Close()
-			trie.Print(f)
+			t.Print(f)
 		}
-		return nil, fmt.Errorf("Expected root: %x, Constructed root: %x\n", stateRoot, trie.Hash())
+		return nil, fmt.Errorf("Expected root: %x, Constructed root: %x", stateRoot, t.Hash())
 	}
 	return &Stateless {
 		stateRoot: stateRoot,
@@ -60,7 +61,7 @@ func NewStateless(stateRoot common.Hash,
 		shortKeys: shortKeys,
 		values: values,
 		blockNr: blockNr,
-		trie: trie,
+		t: t,
 	}, nil
 }
 
@@ -69,7 +70,17 @@ func (s *Stateless) SetBlockNr(blockNr uint64) {
 }
 
 func (s *Stateless) ReadAccountData(address common.Address) (*Account, error) {
-	return nil, nil
+	h := newHasher()
+	defer returnHasherToPool(h)
+	h.sha.Reset()
+	h.sha.Write(address[:])
+	var buf common.Hash
+	h.sha.Read(buf[:])
+	enc, err := s.t.TryGet(nil, buf[:], s.blockNr)
+	if err != nil {
+		return nil, err
+	}
+	return encodingToAccount(enc)
 }
 
 func (s *Stateless) ReadAccountStorage(address common.Address, key *common.Hash) ([]byte, error) {
@@ -85,6 +96,45 @@ func (s *Stateless) ReadAccountCodeSize(codeHash common.Hash) (int, error) {
 }
 
 func (s *Stateless) UpdateAccountData(address common.Address, original, account *Account) error {
+	// Don't write historical record if the account did not change
+	if accountsEqual(original, account) {
+		return nil
+	}
+	h := newHasher()
+	defer returnHasherToPool(h)
+	h.sha.Reset()
+	h.sha.Write(address[:])
+	var buf common.Hash
+	h.sha.Read(buf[:])
+	if account != nil {
+		data, err := rlp.EncodeToBytes(account)
+		if err != nil {
+			return err
+		}
+		err = s.t.TryUpdate(nil, buf[:], data, s.blockNr)
+		if err != nil {
+			return err
+		}
+	} else {
+		err := s.t.TryDelete(nil, buf[:], s.blockNr)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Stateless) CheckRoot(expected common.Hash) error {
+	myRoot := s.t.Hash()
+	if myRoot != expected {
+		filename := fmt.Sprintf("root_%d.txt", s.blockNr)
+		f, err := os.Create(filename)
+		if err == nil {
+			defer f.Close()
+			s.t.Print(f)
+		}
+		return fmt.Errorf("Final root: %x, expected: %x", myRoot, expected)
+	}
 	return nil
 }
 
