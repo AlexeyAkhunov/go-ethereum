@@ -35,16 +35,24 @@ type Stateless struct {
 	trie *trie.Trie
 }
 
-func NewStateless(stateRoot common.Hash, masks []uint32, hashes []common.Hash, shortKeys [][]byte, values [][]byte, blockNr uint64) *Stateless {
-	trie := trie.NewFromProofs(AccountsBucket, nil, false, masks, shortKeys, values, hashes)
-	fmt.Printf("Constructed root: %x\n", trie.Hash())
-	filename := fmt.Sprintf("root_%d.txt", blockNr)
-	f, err := os.Create(filename)
-	if err == nil {
-		defer f.Close()
-		trie.Print(f)
+func NewStateless(stateRoot common.Hash,
+	masks []uint32,
+	hashes []common.Hash,
+	shortKeys [][]byte,
+	values [][]byte,
+	blockNr uint64,
+	trace bool,
+) (*Stateless, error) {
+	trie := trie.NewFromProofs(AccountsBucket, nil, false, masks, shortKeys, values, hashes, trace)
+	if stateRoot != trie.Hash() {
+		filename := fmt.Sprintf("root_%d.txt", blockNr)
+		f, err := os.Create(filename)
+		if err == nil {
+			defer f.Close()
+			trie.Print(f)
+		}
+		return nil, fmt.Errorf("Expected root: %x, Constructed root: %x\n", stateRoot, trie.Hash())
 	}
-	fmt.Printf("Expected root: %x\n", stateRoot)
 	return &Stateless {
 		stateRoot: stateRoot,
 		masks: masks,
@@ -53,7 +61,7 @@ func NewStateless(stateRoot common.Hash, masks []uint32, hashes []common.Hash, s
 		values: values,
 		blockNr: blockNr,
 		trie: trie,
-	}
+	}, nil
 }
 
 func (s *Stateless) SetBlockNr(blockNr uint64) {

@@ -65,8 +65,7 @@ type Trie struct {
 	resolveReads    bool
 	joinGeneration  func(gen uint64)
 	leftGeneration  func(gen uint64)
-	addReadProof    func(prefix, key []byte, pos int, mask uint32, hashes []common.Hash)
-	addWriteProof   func(prefix, key []byte, pos int, mask uint32, hashes []common.Hash)
+	addProof    func(prefix, key []byte, pos int, mask uint32, hashes []common.Hash)
 	addValue        func(prefix, key []byte, pos int, value []byte)
 	addShort        func(prefix, key []byte, pos int, short []byte)
 }
@@ -94,8 +93,7 @@ func New(root common.Hash, bucket []byte, prefix []byte, encodeToBytes bool) *Tr
 		accounts: bytes.Equal(bucket, []byte("AT")),
 		joinGeneration: func(uint64) {},
 		leftGeneration: func(uint64) {},
-		addReadProof: func(prefix, key []byte, pos int, mask uint32, hashes []common.Hash) {},
-		addWriteProof: func(prefix, key []byte, pos int, mask uint32, hashes []common.Hash) {},
+		addProof: func(prefix, key []byte, pos int, mask uint32, hashes []common.Hash) {},
 		addValue: func(prefix, key []byte, pos int, value []byte) {},
 		addShort: func(prefix, key []byte, pos int, short []byte) {},
 	}
@@ -107,52 +105,79 @@ func New(root common.Hash, bucket []byte, prefix []byte, encodeToBytes bool) *Tr
 	return trie
 }
 
-func construct(pos int, masks []uint32, shortKeys [][]byte, values [][]byte, hashes []common.Hash, maskIdx, shortIdx, valueIdx, hashIdx *int) node {
+func construct(pos int,
+	masks []uint32,
+	shortKeys [][]byte,
+	values [][]byte,
+	hashes []common.Hash,
+	maskIdx, shortIdx, valueIdx, hashIdx *int,
+	trace bool,
+) node {
 	fullMask := masks[*maskIdx]
 	(*maskIdx)++
 	mask := fullMask & 0xffff
 	downmask := fullMask >> 16
-	fmt.Printf("mask: %16b, downmask: %16b", mask, downmask)
+	if trace {
+		fmt.Printf("mask: %16b, down: %16b", mask, downmask)
+	}
 	if mask == 0 {
 		// short node (leaf or extension)
 		nKey := shortKeys[*shortIdx]
 		(*shortIdx)++
 		s := &shortNode{Key: hexToCompact(nKey)}
 		s.flags.dirty = true
-		fmt.Printf("\n")
+		if trace {
+			fmt.Printf("\n")
+		}
 		if pos + len(nKey) == 65 {
 			s.Val = valueNode(values[*valueIdx])
 			(*valueIdx)++
 		} else {
-			s.Val = construct(pos+len(nKey), masks, shortKeys, values, hashes, maskIdx, shortIdx, valueIdx, hashIdx)
+			s.Val = construct(pos+len(nKey), masks, shortKeys, values, hashes, maskIdx, shortIdx, valueIdx, hashIdx, trace)
 		}
 		return s
 	} else {
-		fmt.Printf(", hashes:")
+		if trace {
+			fmt.Printf(", hashes:")
+		}
 		// Make a full node
 		f := &fullNode{}
 		f.flags.dirty = true
 		for nibble := byte(0); nibble < 16; nibble++ {
 			if (mask & (uint32(1)<<nibble)) != 0 {
-				fmt.Printf(" %x", hashes[*hashIdx][:4])
+				if trace {
+					fmt.Printf(" %x", hashes[*hashIdx][:2])
+				}
 				f.Children[nibble] = hashNode(common.CopyBytes(hashes[*hashIdx][:]))
 				(*hashIdx)++
 			} else {
 				f.Children[nibble] = nil
-				fmt.Printf(" .")
+				if trace {
+					fmt.Printf(" ....")
+				}
 			}
 		}
-		fmt.Printf("\n")
+		if trace {
+			fmt.Printf("\n")
+		}
 		for nibble := byte(0); nibble < 16; nibble++ {
 			if (downmask & (uint32(1)<<nibble)) != 0 {
-				f.Children[nibble] = construct(pos+1, masks, shortKeys, values, hashes, maskIdx, shortIdx, valueIdx, hashIdx)
+				f.Children[nibble] = construct(pos+1, masks, shortKeys, values, hashes, maskIdx, shortIdx, valueIdx, hashIdx, trace)
 			}
 		}
 		return f
 	}
 }
 
-func NewFromProofs(bucket []byte, prefix []byte, encodeToBytes bool, masks []uint32, shortKeys [][]byte, values [][]byte, hashes []common.Hash) *Trie {
+func NewFromProofs(bucket []byte,
+	prefix []byte,
+	encodeToBytes bool,
+	masks []uint32,
+	shortKeys [][]byte,
+	values [][]byte,
+	hashes []common.Hash,
+	trace bool,
+) *Trie {
 	t := &Trie{
 		bucket: bucket,
 		prefix: prefix,
@@ -160,8 +185,7 @@ func NewFromProofs(bucket []byte, prefix []byte, encodeToBytes bool, masks []uin
 		accounts: bytes.Equal(bucket, []byte("AT")),
 		joinGeneration: func(uint64) {},
 		leftGeneration: func(uint64) {},
-		addReadProof: func(prefix, key []byte, pos int, mask uint32, hashes []common.Hash) {},
-		addWriteProof: func(prefix, key []byte, pos int, mask uint32, hashes []common.Hash) {},
+		addProof: func(prefix, key []byte, pos int, mask uint32, hashes []common.Hash) {},
 		addValue: func(prefix, key []byte, pos int, value []byte) {},
 		addShort: func(prefix, key []byte, pos int, short []byte) {},
 	}
@@ -169,7 +193,7 @@ func NewFromProofs(bucket []byte, prefix []byte, encodeToBytes bool, masks []uin
 	var hashIdx int // index in the hashes
 	var shortIdx int // index in the shortKeys
 	var valueIdx int // inde in the values
-	t.root = construct(0, masks, shortKeys, values, hashes, &maskIdx, &shortIdx, &valueIdx, &hashIdx)
+	t.root = construct(0, masks, shortKeys, values, hashes, &maskIdx, &shortIdx, &valueIdx, &hashIdx, trace)
 	return t
 }
 
@@ -185,15 +209,13 @@ func (t *Trie) SetResolveReads(rr bool) {
 }
 
 func (t *Trie) MakeListed(joinGeneration, leftGeneration func (gen uint64),
-	addReadProof func(prefix, key []byte, pos int, mask uint32, hashes []common.Hash),
-	addWriteProof func(prefix, key []byte, pos int, mask uint32, hashes []common.Hash),
+	addProof func(prefix, key []byte, pos int, mask uint32, hashes []common.Hash),
 	addValue func(prefix, key []byte, pos int, value []byte),
 	addShort func(prefix, key []byte, pos int, short []byte),
 ) {
 	t.joinGeneration = joinGeneration
 	t.leftGeneration = leftGeneration
-	t.addReadProof = addReadProof
-	t.addWriteProof = addWriteProof
+	t.addProof = addProof
 	t.addValue = addValue
 	t.addShort = addShort
 }
@@ -410,7 +432,7 @@ func (t *Trie) tryGet1(db ethdb.Database, origNode node, key []byte, pos int, bl
 		return
 	case *duoNode:
 		if t.resolveReads {
-			t.addReadProof(t.prefix, key, pos, n.mask &^ (uint32(1) << key[pos]), n.hashesExcept(key[pos]))
+			t.addProof(t.prefix, key, pos, n.mask &^ (uint32(1) << key[pos]), n.hashesExcept(key[pos]))
 		}
 		n.updateT(blockNr, t.joinGeneration, t.leftGeneration)
 		var adjust bool
@@ -432,7 +454,7 @@ func (t *Trie) tryGet1(db ethdb.Database, origNode node, key []byte, pos int, bl
 		return
 	case *fullNode:
 		if t.resolveReads {
-			t.addReadProof(t.prefix, key, pos, n.mask() &^ (uint32(1) << key[pos]), n.hashesExcept(key[pos]))
+			t.addProof(t.prefix, key, pos, n.mask() &^ (uint32(1) << key[pos]), n.hashesExcept(key[pos]))
 		}
 		n.updateT(blockNr, t.joinGeneration, t.leftGeneration)
 		child := n.Children[key[pos]]
@@ -755,7 +777,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieCon
 			}
 			return true
 		} else if t.resolveReads {
-			t.addWriteProof(t.prefix, key, pos, uint32(0), []common.Hash{common.BytesToHash(origNode.hash())})
+			t.addProof(t.prefix, key, pos, uint32(0), []common.Hash{common.BytesToHash(origNode.hash())})
 		}
 		c.touched = append(c.touched, Touch{n: value, key: key, pos: pos})
 		c.updated = true
@@ -775,7 +797,6 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieCon
 		var done bool
 		if matchlen == len(nKey) {
 			if t.resolveReads {
-				fmt.Printf("Short value replace %x, type: %T\n", nKey, n.Val)
 				if v, ok := n.Val.(valueNode); ok {
 					t.addValue(t.prefix, key, pos+matchlen, v)
 				}
@@ -793,7 +814,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieCon
 				if v, ok := n.Val.(valueNode); ok {
 					t.addValue(t.prefix, key, pos+matchlen, v)
 				} else {
-					t.addWriteProof(t.prefix, key, pos+matchlen, uint32(0), []common.Hash{common.BytesToHash(n.Val.hash())})
+					t.addProof(t.prefix, key, pos+matchlen, uint32(0), []common.Hash{common.BytesToHash(n.Val.hash())})
 				}
 			}
 			var c1 node
@@ -850,7 +871,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieCon
 
 	case *duoNode:
 		if t.resolveReads {
-			t.addWriteProof(t.prefix, key, pos, n.mask &^ (uint32(1) << key[pos]), n.hashesExcept(key[pos]))
+			t.addProof(t.prefix, key, pos, n.mask &^ (uint32(1) << key[pos]), n.hashesExcept(key[pos]))
 		}
 		n.updateT(blockNr, t.joinGeneration, t.leftGeneration)
 		var done bool
@@ -936,7 +957,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieCon
 
 	case *fullNode:
 		if t.resolveReads {
-			t.addWriteProof(t.prefix, key, pos, n.mask() &^ (uint32(1) << key[pos]), n.hashesExcept(key[pos]))
+			t.addProof(t.prefix, key, pos, n.mask() &^ (uint32(1) << key[pos]), n.hashesExcept(key[pos]))
 		}
 		n.updateT(blockNr, t.joinGeneration, t.leftGeneration)
 		child := n.Children[key[pos]]
@@ -1078,7 +1099,7 @@ func (t *Trie) convertToShortNode(key []byte, keyStart int, child node, pos uint
 				if v, isValue := newshort.Val.(valueNode); isValue {
 					t.addValue(t.prefix, proofKey, keyStart+len(k), v)
 				} else {
-					t.addWriteProof(t.prefix, proofKey, keyStart+len(k), uint32(0), []common.Hash{})
+					t.addProof(t.prefix, proofKey, keyStart+len(k), uint32(0), []common.Hash{})
 				}
 			}
 			return done
@@ -1101,7 +1122,7 @@ func (t *Trie) convertToShortNode(key []byte, keyStart int, child node, pos uint
 		if v, isValue := newshort.Val.(valueNode); isValue {
 			t.addValue(t.prefix, proofKey, keyStart+1, v)
 		} else {
-			t.addWriteProof(t.prefix, proofKey, keyStart+1, uint32(0), []common.Hash{})
+			t.addProof(t.prefix, proofKey, keyStart+1, uint32(0), []common.Hash{})
 		}
 	}
 	return done
@@ -1176,7 +1197,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, c *TrieContinuati
 
 	case *duoNode:
 		if t.resolveReads {
-			t.addWriteProof(t.prefix, key, keyStart, n.mask &^ (uint32(1) << key[keyStart]), n.hashesExcept(key[keyStart]))
+			t.addProof(t.prefix, key, keyStart, n.mask &^ (uint32(1) << key[keyStart]), n.hashesExcept(key[keyStart]))
 		}
 		n.updateT(blockNr, t.joinGeneration, t.leftGeneration)
 		var done bool
@@ -1251,7 +1272,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, c *TrieContinuati
 
 	case *fullNode:
 		if t.resolveReads {
-			t.addWriteProof(t.prefix, key, keyStart, n.mask() &^ (uint32(1) << key[keyStart]), n.hashesExcept(key[keyStart]))
+			t.addProof(t.prefix, key, keyStart, n.mask() &^ (uint32(1) << key[keyStart]), n.hashesExcept(key[keyStart]))
 		}
 		n.updateT(blockNr, t.joinGeneration, t.leftGeneration)
 		child := n.Children[key[keyStart]]
