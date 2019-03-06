@@ -18,8 +18,10 @@ package state
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/trie"
 )
 
 /* Proof Of Concept for verification of Stateless client proofs */
@@ -27,20 +29,30 @@ type Stateless struct {
 	stateRoot common.Hash
 	masks []uint32
 	hashes []common.Hash
-	shortLens []int
+	shortKeys [][]byte
 	values [][]byte
 	blockNr uint64
-	valueIdx int // Current value index
+	trie *trie.Trie
 }
 
-func NewStateless(stateRoot common.Hash, masks []uint32, hashes []common.Hash, shortLens []int, values [][]byte, blockNr uint64) *Stateless {
+func NewStateless(stateRoot common.Hash, masks []uint32, hashes []common.Hash, shortKeys [][]byte, values [][]byte, blockNr uint64) *Stateless {
+	trie := trie.NewFromProofs(AccountsBucket, nil, false, masks, shortKeys, values, hashes)
+	fmt.Printf("Constructed root: %x\n", trie.Hash())
+	filename := fmt.Sprintf("root_%d.txt", blockNr)
+	f, err := os.Create(filename)
+	if err == nil {
+		defer f.Close()
+		trie.Print(f)
+	}
+	fmt.Printf("Expected root: %x\n", stateRoot)
 	return &Stateless {
 		stateRoot: stateRoot,
 		masks: masks,
 		hashes: hashes,
-		shortLens: shortLens,
+		shortKeys: shortKeys,
 		values: values,
 		blockNr: blockNr,
+		trie: trie,
 	}
 }
 
@@ -49,10 +61,7 @@ func (s *Stateless) SetBlockNr(blockNr uint64) {
 }
 
 func (s *Stateless) ReadAccountData(address common.Address) (*Account, error) {
-	fmt.Printf("ReadAccountData, s.valueIdx %d\n", s.valueIdx)
-	vi := s.valueIdx
-	s.valueIdx++
-	return encodingToAccount(s.values[vi])
+	return nil, nil
 }
 
 func (s *Stateless) ReadAccountStorage(address common.Address, key *common.Hash) ([]byte, error) {

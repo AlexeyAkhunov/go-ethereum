@@ -161,9 +161,9 @@ func (n *duoNode) hashesExcept(idx byte) []common.Hash {
 	case i1:
 		return []common.Hash{common.BytesToHash(n.child2.hash())}
 	case i2:
-		return []common.Hash{common.BytesToHash(n.child2.hash())}
+		return []common.Hash{common.BytesToHash(n.child1.hash())}
 	default:
-		return []common.Hash{common.BytesToHash(n.child2.hash()), common.BytesToHash(n.child2.hash())}
+		return []common.Hash{common.BytesToHash(n.child1.hash()), common.BytesToHash(n.child2.hash())}
 	}
 }
 
@@ -378,7 +378,7 @@ func printDiffSide(n node, w io.Writer, ind string, key string) {
 			fmt.Fprintf(w, "\n")
 			fmt.Fprintf(w, "%s)\n", ind)
 		case *shortNode:
-			fmt.Fprintf(w, "short(")
+			fmt.Fprintf(w, "short %x(", n.hash())
 			keyHex := compactToHex(n.Key)
 			hexV := make([]byte, len(keyHex))
 			for i := 0; i < len(hexV); i++ {
@@ -432,6 +432,7 @@ func printDiff(n1, n2 node, w io.Writer, ind string, key string) {
 			} else {
 				fmt.Fprintf(w, "%s/%T\n", ind, n2)
 				printDiffSide(n1, w, ind, key)
+				printDiffSide(n2, w, ind, key)
 			}
 			fmt.Fprintf(w, "%s)\n", ind)
 		case *duoNode:
@@ -485,8 +486,8 @@ func printDiff(n1, n2 node, w io.Writer, ind string, key string) {
 			if n, ok := n2.(hashNode); ok {
 				fmt.Fprintf(w, "%x/%x", []byte(n1), []byte(n))
 			} else {
-				fmt.Fprintf(w, "hash(%x)/%T\n", []byte(n1), n2)
-				printDiffSide(n2, w, ind, key)
+				fmt.Fprintf(w, "hash(%x)/%T(%x)\n", []byte(n1), n2, n2.hash())
+				//printDiffSide(n2, w, ind, key)
 			}
 			fmt.Fprintf(w, ")")
 		}

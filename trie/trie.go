@@ -107,8 +107,53 @@ func New(root common.Hash, bucket []byte, prefix []byte, encodeToBytes bool) *Tr
 	return trie
 }
 
-func NewFromProofs(bucket []byte, prefix []byte, encodeToBytes bool, masks []uint32, shortLens []int, hashes []common.Hash) *Trie {
-	trie := &Trie{
+func construct(pos int, masks []uint32, shortKeys [][]byte, values [][]byte, hashes []common.Hash, maskIdx, shortIdx, valueIdx, hashIdx *int) node {
+	fullMask := masks[*maskIdx]
+	(*maskIdx)++
+	mask := fullMask & 0xffff
+	downmask := fullMask >> 16
+	fmt.Printf("mask: %16b, downmask: %16b", mask, downmask)
+	if mask == 0 {
+		// short node (leaf or extension)
+		nKey := shortKeys[*shortIdx]
+		(*shortIdx)++
+		s := &shortNode{Key: hexToCompact(nKey)}
+		s.flags.dirty = true
+		fmt.Printf("\n")
+		if pos + len(nKey) == 65 {
+			s.Val = valueNode(values[*valueIdx])
+			(*valueIdx)++
+		} else {
+			s.Val = construct(pos+len(nKey), masks, shortKeys, values, hashes, maskIdx, shortIdx, valueIdx, hashIdx)
+		}
+		return s
+	} else {
+		fmt.Printf(", hashes:")
+		// Make a full node
+		f := &fullNode{}
+		f.flags.dirty = true
+		for nibble := byte(0); nibble < 16; nibble++ {
+			if (mask & (uint32(1)<<nibble)) != 0 {
+				fmt.Printf(" %x", hashes[*hashIdx][:4])
+				f.Children[nibble] = hashNode(common.CopyBytes(hashes[*hashIdx][:]))
+				(*hashIdx)++
+			} else {
+				f.Children[nibble] = nil
+				fmt.Printf(" .")
+			}
+		}
+		fmt.Printf("\n")
+		for nibble := byte(0); nibble < 16; nibble++ {
+			if (downmask & (uint32(1)<<nibble)) != 0 {
+				f.Children[nibble] = construct(pos+1, masks, shortKeys, values, hashes, maskIdx, shortIdx, valueIdx, hashIdx)
+			}
+		}
+		return f
+	}
+}
+
+func NewFromProofs(bucket []byte, prefix []byte, encodeToBytes bool, masks []uint32, shortKeys [][]byte, values [][]byte, hashes []common.Hash) *Trie {
+	t := &Trie{
 		bucket: bucket,
 		prefix: prefix,
 		encodeToBytes: encodeToBytes,
@@ -120,7 +165,12 @@ func NewFromProofs(bucket []byte, prefix []byte, encodeToBytes bool, masks []uin
 		addValue: func(prefix, key []byte, pos int, value []byte) {},
 		addShort: func(prefix, key []byte, pos int, short []byte) {},
 	}
-	return trie
+	var maskIdx int
+	var hashIdx int // index in the hashes
+	var shortIdx int // index in the shortKeys
+	var valueIdx int // inde in the values
+	t.root = construct(0, masks, shortKeys, values, hashes, &maskIdx, &shortIdx, &valueIdx, &hashIdx)
+	return t
 }
 
 func (t *Trie) SetHistorical(h bool) {
@@ -472,138 +522,6 @@ func (t *Trie) Print(w io.Writer) {
 	fmt.Fprintf(w, "\n")
 }
 
-// Fills in the hashes for the proofs
-func (t *Trie) ExtractProofs(masks []uint32, shortLens []int, db ethdb.Database, blockNr uint64) []common.Hash {
-	var hashes []common.Hash
-	var si int // index in the shortLens
-	keyStack := [][]byte{[]byte{}}
-	nodeStack := []node{t.root}
-	top := 1
-	pos := 0
-	for _, fullMask := range masks {
-		top--
-		n := nodeStack[top]
-		nodeStack[top] = nil
-		key := keyStack[top]
-		keyStack[top] = nil
-		mask := fullMask & 0xffff
-		downmask := fullMask >> 16
-		fmt.Printf("mask: %16b, downmask: %16b, key: %x\n", mask, downmask, key)
-		if mask == 0 {
-			// short node (leaf or extension)
-			if len(key) + shortLens[si] < 65 {
-				s := n.(*shortNode)
-				sKey := compactToHex(s.Key)
-				child := s.Val
-				var err error
-				if nhash, ok := child.(hashNode); ok {
-					child, err = t.resolveHash(db, nhash, key, pos, blockNr)
-					if err != nil {
-						panic(err)
-					}
-				}
-				newkey := append(common.CopyBytes(key), sKey...)
-				if top == len(nodeStack) {
-					nodeStack = append(nodeStack, child)
-					keyStack = append(keyStack, newkey)
-				} else {
-					nodeStack[top] = child
-					keyStack[top] = newkey
-				}
-				top++
-			}
-			si++
-		} else {
-			if f, ok := n.(*fullNode); ok {
-				for nibble := byte(0); nibble < 16; nibble++ {
-					if (mask & (uint32(1) << nibble)) != 0 {
-						hashes = append(hashes, common.BytesToHash(f.Children[nibble].hash()))
-					}
-				}
-			} else {
-				d := n.(*duoNode)
-				i1, i2 := d.childrenIdx()
-				if (mask & (uint32(1) << i1)) != 0 {
-					hashes = append(hashes, common.BytesToHash(d.child1.hash()))
-				}
-				if (mask & (uint32(1) << i2)) != 0 {
-					hashes = append(hashes, common.BytesToHash(d.child2.hash()))
-				}
-			}
-		}
-		if downmask == 0 {
-
-		} else {
-			if f, ok := n.(*fullNode); ok {
-				for cNibble := byte(0); cNibble < 16; cNibble++ {
-					nibble := byte(15) - cNibble
-					if downmask & (uint32(1) << nibble) != 0 {
-						child := f.Children[nibble]
-						var err error
-						if nhash, ok := child.(hashNode); ok {
-							child, err = t.resolveHash(db, nhash, key, pos, blockNr)
-							if err != nil {
-								panic(err)
-							}
-						}
-						newkey := append(common.CopyBytes(key), nibble)
-						if top == len(nodeStack) {
-							nodeStack = append(nodeStack, child)
-							keyStack = append(keyStack, newkey)
-						} else {
-							nodeStack[top] = child
-							keyStack[top] = newkey
-						}
-						top++
-					}
-				}
-			} else {
-				d := n.(*duoNode)
-				i1, i2 := d.childrenIdx()
-				if downmask & (uint32(1) << i2) != 0 {
-					child := d.child2
-					var err error
-					if nhash, ok := child.(hashNode); ok {
-						child, err = t.resolveHash(db, nhash, key, pos, blockNr)
-						if err != nil {
-							panic(err)
-						}
-					}
-					newkey := append(common.CopyBytes(key), byte(i2))
-					if top == len(nodeStack) {
-						nodeStack = append(nodeStack, child)
-						keyStack = append(keyStack, newkey)
-					} else {
-						nodeStack[top] = child
-						keyStack[top] = newkey
-					}
-					top++
-				}
-				if downmask & (uint32(1) << i1) != 0 {
-					child := d.child1
-					var err error
-					if nhash, ok := child.(hashNode); ok {
-						child, err = t.resolveHash(db, nhash, key, pos, blockNr)
-						if err != nil {
-							panic(err)
-						}
-					}
-					newkey := append(common.CopyBytes(key), byte(i1))
-					if top == len(nodeStack) {
-						nodeStack = append(nodeStack, child)
-						keyStack = append(keyStack, newkey)
-					} else {
-						nodeStack[top] = child
-						keyStack[top] = newkey
-					}
-					top++
-				}
-			}
-		}
-	}
-	return hashes
-}
-
 func loadNode(br *bufio.Reader) (node, error) {
 	nodeType, err := br.ReadString('(')
 	if err != nil {
@@ -857,7 +775,10 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieCon
 		var done bool
 		if matchlen == len(nKey) {
 			if t.resolveReads {
-				fmt.Printf("Short node value change\n")
+				fmt.Printf("Short value replace %x, type: %T\n", nKey, n.Val)
+				if v, ok := n.Val.(valueNode); ok {
+					t.addValue(t.prefix, key, pos+matchlen, v)
+				}
 			}
 			done = t.insert(n.Val, key, pos+matchlen, value, c, blockNr)
 			if c.updated {
@@ -867,10 +788,14 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieCon
 			c.n = n
 			n.adjustTod(blockNr)
 		} else {
-			if t.resolveReads {
-				fmt.Printf("Short node -> branch\n")
-			}
 			// Otherwise branch out at the index where they differ.
+			if t.resolveReads {
+				if v, ok := n.Val.(valueNode); ok {
+					t.addValue(t.prefix, key, pos+matchlen, v)
+				} else {
+					t.addWriteProof(t.prefix, key, pos+matchlen, uint32(0), []common.Hash{common.BytesToHash(n.Val.hash())})
+				}
+			}
 			var c1 node
 			if len(nKey) == matchlen+1 {
 				c1 = n.Val
@@ -1043,24 +968,6 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieCon
 			n.adjustTod(blockNr)
 		}
 		return done
-/*
-	case nil:
-		if t.resolveReads {
-			fmt.Printf("nil node insert\n")
-		}
-		if t.resolveReads {
-			t.addValue(t.prefix, key, pos, nil)
-		}
-		newnode := &shortNode{Key: hexToCompact(key[pos:])}
-		newnode.Val = value
-		newnode.flags.dirty = true
-		newnode.flags.t = blockNr
-		newnode.adjustTod(blockNr)
-		t.joinGeneration(blockNr)
-		c.updated = true
-		c.n = newnode
-		return true
-*/
 	case hashNode:
 		var done bool
 		// We've hit a part of the trie that isn't loaded yet. Load

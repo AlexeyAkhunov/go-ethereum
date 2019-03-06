@@ -171,6 +171,11 @@ func stateless() {
 	check(err)
 	bc, err := core.NewBlockChain(stateDb, nil, chainConfig, engine, vmConfig, nil)
 	check(err)
+	var preRoot common.Hash
+	genesisBlock, _, _, err := core.DefaultGenesisBlock().ToBlock(nil)
+	check(err)
+	preRoot = genesisBlock.Header().Root
+	//check(err)
 	bc.SetNoHistory(true)
 	bc.SetResolveReads(true)
 	blockNum := uint64(1)
@@ -180,13 +185,19 @@ func stateless() {
 		if block == nil {
 			break
 		}
+		filename := fmt.Sprintf("right_%d.txt", blockNum-1)
+		f, err := os.Create(filename)
+		if err == nil {
+			defer f.Close()
+			bc.GetTrieDbState().PrintTrie(f)
+		}
 		_, err = bc.InsertChain(types.Blocks{block})
 		if err != nil {
 			fmt.Printf("Failed on block %d\n", blockNum)
 		}
 		check(err)
-		masks, hashes, shortLens, values := bc.GetTrieDbState().ExtractProofs()
-		dbstate := state.NewStateless(block.Root(), masks, hashes, shortLens, values, block.NumberU64()-1)
+		masks, hashes, shortKeys, values := bc.GetTrieDbState().ExtractProofs()
+		dbstate := state.NewStateless(preRoot, masks, hashes, shortKeys, values, block.NumberU64()-1)
 
 		statedb := state.New(dbstate)
 		//statedb.SetTracer(slt)
@@ -213,10 +224,11 @@ func stateless() {
 			//}
 		}
 		// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-		_, err := engine.Finalize(bcb, header, statedb, block.Transactions(), block.Uncles(), receipts)
+		_, err = engine.Finalize(bcb, header, statedb, block.Transactions(), block.Uncles(), receipts)
 		if err != nil {
 			panic(fmt.Errorf("Finalize of block %d failed: %v", blockNum, err))
 		}
+		preRoot = header.Root
 		/*
 		ps := &ProofSizer{ethDb: bc.GetTrieDbState().Database()}
 		for account := range slt.accountsReadSet {
