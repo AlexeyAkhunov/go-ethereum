@@ -113,8 +113,8 @@ func stateless() {
 		err = dbstate.CheckRoot(header.Root)
 		if err != nil {
 			filename := fmt.Sprintf("right_%d.txt", blockNum)
-			f, err := os.Create(filename)
-			if err == nil {
+			f, err1 := os.Create(filename)
+			if err1 == nil {
 				defer f.Close()
 				bc.GetTrieDbState().PrintTrie(f)
 			}

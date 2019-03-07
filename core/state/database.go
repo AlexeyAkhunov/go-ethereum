@@ -139,11 +139,17 @@ type TrieDbState struct {
 	noHistory        bool
 	resolveReads     bool
 	proofMasks       map[string]uint32
+	sMasks           map[string]map[string]uint32
 	proofHashes      map[string][16]common.Hash
+	sHashes          map[string]map[string][16]common.Hash
 	createdProofs    map[string]struct{}
+	sCreatedProofs   map[string]map[string]struct{}
 	proofShorts      map[string][]byte
+	sShorts          map[string]map[string][]byte
 	createdShorts    map[string]struct{}
+	sCreatedShorts   map[string]map[string]struct{}
 	proofValues      map[string][]byte
+	sValues          map[string]map[string][]byte
 	proofCodes       map[common.Hash]struct{}
 }
 
@@ -166,11 +172,17 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 		accountUpdates: make(map[common.Hash]*Account),
 		deleted: make(map[common.Hash]struct{}),
 		proofMasks: make(map[string]uint32),
+		sMasks: make(map[string]map[string]uint32),
 		proofHashes: make(map[string][16]common.Hash),
+		sHashes: make(map[string]map[string][16]common.Hash),
 		createdProofs: make(map[string]struct{}),
+		sCreatedProofs: make(map[string]map[string]struct{}),
 		proofShorts: make(map[string][]byte),
+		sShorts: make(map[string]map[string][]byte),
 		createdShorts: make(map[string]struct{}),
+		sCreatedShorts: make(map[string]map[string]struct{}),
 		proofValues: make(map[string][]byte),
+		sValues: make(map[string]map[string][]byte),
 		proofCodes: make(map[common.Hash]struct{}),
 		codeCache: cc,
 		codeSizeCache: csc,
@@ -206,11 +218,17 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 		accountUpdates: make(map[common.Hash]*Account),
 		deleted: make(map[common.Hash]struct{}),
 		proofMasks: make(map[string]uint32),
+		sMasks: make(map[string]map[string]uint32),
 		proofHashes: make(map[string][16]common.Hash),
+		sHashes: make(map[string]map[string][16]common.Hash),
 		createdProofs: make(map[string]struct{}),
+		sCreatedProofs: make(map[string]map[string]struct{}),
 		proofShorts: make(map[string][]byte),
+		sShorts: make(map[string]map[string][]byte),
 		createdShorts: make(map[string]struct{}),
+		sCreatedShorts: make(map[string]map[string]struct{}),
 		proofValues: make(map[string][]byte),
+		sValues: make(map[string]map[string][]byte),
 		proofCodes: make(map[common.Hash]struct{}),
 	}
 	return &cpy
@@ -237,45 +255,22 @@ func (tds *TrieDbState) ExtractProofs(trace bool) (masks []uint32, hashes []comm
 	// Collect all the strings
 	keys := []string{}
 	keySet := make(map[string]struct{})
-	storageKeys := []string{}
-	storageKeySet := make(map[string]struct{})
 	for key := range tds.proofMasks {
-		if len(key) <= 65 {
-			if _, ok := keySet[key]; !ok {	
-				keys = append(keys, key)
-				keySet[key] = struct{}{}
-			}
-		} else {
-			if _, ok := storageKeySet[key]; !ok {	
-				storageKeys = append(storageKeys, key)
-				storageKeySet[key] = struct{}{}
-			}
+		if _, ok := keySet[key]; !ok {
+			keys = append(keys, key)
+			keySet[key] = struct{}{}
 		}
 	}
 	for key := range tds.proofShorts {
-		if len(key) <= 65 {
-			if _, ok := keySet[key]; !ok {	
-				keys = append(keys, key)
-				keySet[key] = struct{}{}
-			}
-		} else {
-			if _, ok := storageKeySet[key]; !ok {	
-				storageKeys = append(storageKeys, key)
-				storageKeySet[key] = struct{}{}
-			}
+		if _, ok := keySet[key]; !ok {
+			keys = append(keys, key)
+			keySet[key] = struct{}{}
 		}
 	}
 	for key := range tds.proofValues {
-		if len(key) <= 65 {
-			if _, ok := keySet[key]; !ok {	
-				keys = append(keys, key)
-				keySet[key] = struct{}{}
-			}
-		} else {
-			if _, ok := storageKeySet[key]; !ok {	
-				storageKeys = append(storageKeys, key)
-				storageKeySet[key] = struct{}{}
-			}
+		if _, ok := keySet[key]; !ok {
+			keys = append(keys, key)
+			keySet[key] = struct{}{}
 		}
 	}
 	sort.Strings(keys)
@@ -357,11 +352,17 @@ func (tds *TrieDbState) ExtractProofs(trace bool) (masks []uint32, hashes []comm
 		fmt.Printf("\n")
 	}
 	tds.proofMasks = make(map[string]uint32)
+	tds.sMasks = make(map[string]map[string]uint32)
 	tds.proofHashes = make(map[string][16]common.Hash)
+	tds.sHashes = make(map[string]map[string][16]common.Hash)
 	tds.createdProofs = make(map[string]struct{})
+	tds.sCreatedProofs = make(map[string]map[string]struct{})
 	tds.proofShorts = make(map[string][]byte)
+	tds.sShorts = make(map[string]map[string][]byte)
 	tds.createdShorts = make(map[string]struct{})
+	tds.sCreatedShorts = make(map[string]map[string]struct{})
 	tds.proofValues = make(map[string][]byte)
+	tds.sValues = make(map[string]map[string][]byte)
 	tds.proofCodes = make(map[common.Hash]struct{})
 	return masks, hashes, shortKeys, values
 }
@@ -682,19 +683,54 @@ func (tds *TrieDbState) leftGeneration(gen uint64) {
 
 func (tds *TrieDbState) addProof(prefix, key []byte, pos int, mask uint32, hashes []common.Hash) {
 	if tds.resolveReads {
-		k := make([]byte, len(prefix) + pos)
-		copy(k, prefix)
-		copy(k[len(prefix):], key[:pos])
+		var createdProofs map[string]struct{}
+		if prefix == nil {
+			createdProofs = tds.createdProofs
+		} else {
+			var ok bool
+			ps := string(prefix)
+			createdProofs, ok = tds.sCreatedProofs[ps]
+			if !ok {
+				createdProofs = make(map[string]struct{})
+				tds.sCreatedProofs[ps] = createdProofs
+			}
+		}
+		var proofMasks map[string]uint32
+		if prefix == nil {
+			proofMasks = tds.proofMasks
+		} else {
+			var ok bool
+			ps := string(prefix)
+			proofMasks, ok = tds.sMasks[ps]
+			if !ok {
+				proofMasks = make(map[string]uint32)
+				tds.sMasks[ps] = proofMasks
+			}
+		}
+		var proofHashes map[string][16]common.Hash
+		if prefix == nil {
+			proofHashes = tds.proofHashes
+		} else {
+			var ok bool
+			ps := string(prefix)
+			proofHashes, ok = tds.sHashes[ps]
+			if !ok {
+				proofHashes = make(map[string][16]common.Hash)
+				tds.sHashes[ps] = proofHashes
+			}
+		}
+		k := make([]byte, pos)
+		copy(k, key[:pos])
 		ks := string(k)
-		if _, ok := tds.createdProofs[ks]; ok {
+		if _, ok := createdProofs[ks]; ok {
 			return
 		}
-		if m, ok := tds.proofMasks[ks]; ok {
+		if m, ok := proofMasks[ks]; ok {
 			intersection := m & mask
 			if mask != 0 {
-				tds.proofMasks[ks] = intersection
+				proofMasks[ks] = intersection
 			}
-			h := tds.proofHashes[ks]
+			h := proofHashes[ks]
 			idx := 0
 			for i := byte(0); i < 16; i++ {
 				if intersection & (uint32(1) << i) != 0 {
@@ -709,10 +745,10 @@ func (tds *TrieDbState) addProof(prefix, key []byte, pos int, mask uint32, hashe
 			if mask == 0 && len(hashes) == 1 {
 				h[0] = hashes[0]
 			}
-			tds.proofHashes[ks] = h
+			proofHashes[ks] = h
 		} else {
 			if mask != 0 {
-				tds.proofMasks[ks] = mask
+				proofMasks[ks] = mask
 			}
 			var h [16]common.Hash
 			idx := 0
@@ -725,62 +761,119 @@ func (tds *TrieDbState) addProof(prefix, key []byte, pos int, mask uint32, hashe
 			if mask == 0 && len(hashes) == 1 {
 				h[0] = hashes[0]
 			}
-			tds.proofHashes[ks] = h
+			proofHashes[ks] = h
 		}
 	}
 }
 
 func (tds *TrieDbState) createProof(prefix, key []byte, pos int) {
 	if tds.resolveReads {
+		var createdProofs map[string]struct{}
+		if prefix == nil {
+			createdProofs = tds.createdProofs
+		} else {
+			var ok bool
+			ps := string(prefix)
+			createdProofs, ok = tds.sCreatedProofs[ps]
+			if !ok {
+				createdProofs = make(map[string]struct{})
+				tds.sCreatedProofs[ps] = createdProofs
+			}
+		}
 		k := make([]byte, len(prefix) + pos)
 		copy(k, prefix)
 		copy(k[len(prefix):], key[:pos])
 		ks := string(k)
-		if _, ok := tds.createdProofs[ks]; !ok {
-			tds.createdProofs[ks] = struct{}{}
+		if _, ok := createdProofs[ks]; !ok {
+			createdProofs[ks] = struct{}{}
 		}
 	}
 }
 
 func (tds *TrieDbState) addValue(prefix, key []byte, pos int, value []byte) {
 	if tds.resolveReads {
+		var proofValues map[string][]byte
+		if prefix == nil {
+			proofValues = tds.proofValues
+		} else {
+			var ok bool
+			ps := string(prefix)
+			proofValues, ok = tds.sValues[ps]
+			if !ok {
+				proofValues = make(map[string][]byte)
+				tds.sValues[ps] = proofValues
+			}
+		}
 		k := make([]byte, len(prefix) + pos)
 		copy(k, prefix)
 		copy(k[len(prefix):], key[:pos])
 		ks := string(k)
-		if _, ok := tds.proofValues[ks]; !ok {
-			tds.proofValues[ks] = value
+		if _, ok := proofValues[ks]; !ok {
+			proofValues[ks] = value
 		}
 	}
 }
 
 func (tds *TrieDbState) createShort(prefix, key []byte, pos int) {
 	if tds.resolveReads {
+		var createdShorts map[string]struct{}
+		if prefix == nil {
+			createdShorts = tds.createdShorts
+		} else {
+			var ok bool
+			ps := string(prefix)
+			createdShorts, ok = tds.sCreatedShorts[ps]
+			if !ok {
+				createdShorts = make(map[string]struct{})
+				tds.sCreatedShorts[ps] = createdShorts
+			}
+		}
 		k := make([]byte, len(prefix) + pos)
 		copy(k, prefix)
 		copy(k[len(prefix):], key[:pos])
 		ks := string(k)
-		if _, ok := tds.createdShorts[ks]; !ok {
-			tds.createdShorts[ks] = struct{}{}
+		if _, ok := createdShorts[ks]; !ok {
+			createdShorts[ks] = struct{}{}
 		}
 	}
 }
 
 func (tds *TrieDbState) addShort(prefix, key []byte, pos int, short []byte) bool {
 	if tds.resolveReads {
+		var createdShorts map[string]struct{}
+		if prefix == nil {
+			createdShorts = tds.createdShorts
+		} else {
+			var ok bool
+			ps := string(prefix)
+			createdShorts, ok = tds.sCreatedShorts[ps]
+			if !ok {
+				createdShorts = make(map[string]struct{})
+				tds.sCreatedShorts[ps] = createdShorts
+			}
+		}
+		var proofShorts map[string][]byte
+		if prefix == nil {
+			proofShorts = tds.proofShorts
+		} else {
+			var ok bool
+			ps := string(prefix)
+			proofShorts, ok = tds.sShorts[ps]
+			if !ok {
+				proofShorts = make(map[string][]byte)
+				tds.sShorts[ps] = proofShorts
+			}
+		}
 		k := make([]byte, len(prefix) + pos)
 		copy(k, prefix)
 		copy(k[len(prefix):], key[:pos])
 		ks := string(k)
-		if _, ok := tds.createdShorts[ks]; ok {
-			//fmt.Printf("Already created\n")
+		if _, ok := createdShorts[ks]; ok {
 			return false
 		}
-		if _, ok := tds.proofShorts[ks]; !ok {
-			tds.proofShorts[ks] = common.CopyBytes(short)
+		if _, ok := proofShorts[ks]; !ok {
+			proofShorts[ks] = common.CopyBytes(short)
 			return true
-		} else {
-			//fmt.Printf("Already has short\n")
 		}
 	}
 	return false

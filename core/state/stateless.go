@@ -84,6 +84,7 @@ func (s *Stateless) ReadAccountData(address common.Address) (*Account, error) {
 }
 
 func (s *Stateless) ReadAccountStorage(address common.Address, key *common.Hash) ([]byte, error) {
+	fmt.Printf("ReadAccountStorage\n")
 	return nil, nil
 }
 
@@ -139,6 +140,7 @@ func (s *Stateless) CheckRoot(expected common.Hash) error {
 }
 
 func (s *Stateless) UpdateAccountCode(codeHash common.Hash, code []byte) error {
+	fmt.Printf("UpdateAccountCode\n")
 	return nil
 }
 
@@ -147,5 +149,6 @@ func (s *Stateless) DeleteAccount(address common.Address, original *Account) err
 }
 
 func (s *Stateless) WriteAccountStorage(address common.Address, key, original, value *common.Hash) error {
+	fmt.Printf("WriteAccountStorage\n")
 	return nil
 }
