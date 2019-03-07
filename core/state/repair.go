@@ -234,7 +234,7 @@ func (rds *RepairDbState) getStorageTrie(address common.Address, create bool) (*
 		} else {
 			t = trie.New(account.Root, StorageBucket, address[:], true)
 		}
-		t.MakeListed(rds.joinGeneration, rds.leftGeneration, rds.addProof, rds.addValue, rds.addShort)
+		t.MakeListed(rds.joinGeneration, rds.leftGeneration, rds.addProof, rds.createProof, rds.addValue, rds.addShort, rds.createShort)
 		rds.storageTries[address] = t
 	}
 	return t, nil
@@ -427,10 +427,17 @@ func (rds *RepairDbState) leftGeneration(gen uint64) {
 func (rds *RepairDbState) addProof(prefix, key []byte, pos int, mask uint32, hashes []common.Hash) {
 }
 
+func (rds *RepairDbState) createProof(prefix, key []byte, pos int) {
+}
+
 func (rds *RepairDbState) addValue(prefix, key []byte, pos int, value []byte) {
 }
 
-func (rds *RepairDbState) addShort(prefix, key []byte, pos int, short []byte) {
+func (rds *RepairDbState) addShort(prefix, key []byte, pos int, short []byte) bool {
+	return false
+}
+
+func (rds *RepairDbState) createShort(prefix, key []byte, pos int) {
 }
 
 func (rds *RepairDbState) PruneTries() {

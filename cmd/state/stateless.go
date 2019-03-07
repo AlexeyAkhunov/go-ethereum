@@ -65,21 +65,23 @@ func stateless() {
 		if block == nil {
 			break
 		}
+		trace := blockNum == 49018
+		if trace {
+			filename := fmt.Sprintf("right_%d.txt", blockNum-1)
+			f, err1 := os.Create(filename)
+			if err1 == nil {
+				defer f.Close()
+				bc.GetTrieDbState().PrintTrie(f)
+			}
+		}
 		_, err = bc.InsertChain(types.Blocks{block})
 		if err != nil {
 			fmt.Printf("Failed on block %d\n", blockNum)
 		}
 		check(err)
-		trace := blockNum == 148
 		masks, hashes, shortKeys, values := bc.GetTrieDbState().ExtractProofs(trace)
 		dbstate, err := state.NewStateless(preRoot, masks, hashes, shortKeys, values, block.NumberU64()-1, trace)
 		if err != nil {
-			filename := fmt.Sprintf("right_%d.txt", blockNum-1)
-			f, err := os.Create(filename)
-			if err == nil {
-				defer f.Close()
-				bc.GetTrieDbState().PrintTrie(f)
-			}
 			panic(err)
 		}
 		statedb := state.New(dbstate)
@@ -123,7 +125,7 @@ func stateless() {
 		fmt.Fprintf(w, "%d,%d,%d\n", blockNum, len(slt.accountsWriteSet), len(slt.storageWriteSet))
 		*/
 		blockNum++
-		if blockNum == 1000 {
+		if blockNum == 100000 {
 			break
 		}
 		//if blockNum % 1000 == 0 {

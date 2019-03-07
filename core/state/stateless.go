@@ -46,7 +46,7 @@ func NewStateless(stateRoot common.Hash,
 ) (*Stateless, error) {
 	t := trie.NewFromProofs(AccountsBucket, nil, false, masks, shortKeys, values, hashes, trace)
 	if stateRoot != t.Hash() {
-		filename := fmt.Sprintf("root_%d.txt", blockNr-1)
+		filename := fmt.Sprintf("root_%d.txt", blockNr)
 		f, err := os.Create(filename)
 		if err == nil {
 			defer f.Close()

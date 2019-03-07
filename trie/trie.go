@@ -65,9 +65,11 @@ type Trie struct {
 	resolveReads    bool
 	joinGeneration  func(gen uint64)
 	leftGeneration  func(gen uint64)
-	addProof    func(prefix, key []byte, pos int, mask uint32, hashes []common.Hash)
+	addProof        func(prefix, key []byte, pos int, mask uint32, hashes []common.Hash)
+	createProof     func(prefix, key []byte, pos int)
 	addValue        func(prefix, key []byte, pos int, value []byte)
-	addShort        func(prefix, key []byte, pos int, short []byte)
+	addShort        func(prefix, key []byte, pos int, short []byte) bool
+	createShort     func(prefix, key []byte, pos int)
 }
 
 func (t *Trie) PrintTrie() {
@@ -94,8 +96,10 @@ func New(root common.Hash, bucket []byte, prefix []byte, encodeToBytes bool) *Tr
 		joinGeneration: func(uint64) {},
 		leftGeneration: func(uint64) {},
 		addProof: func(prefix, key []byte, pos int, mask uint32, hashes []common.Hash) {},
+		createProof: func(prefix, key []byte, pos int) {},
 		addValue: func(prefix, key []byte, pos int, value []byte) {},
-		addShort: func(prefix, key []byte, pos int, short []byte) {},
+		addShort: func(prefix, key []byte, pos int, short []byte) bool {return false},
+		createShort: func(prefix, key []byte, pos int) {},
 	}
 	if (root != common.Hash{}) && root != emptyRoot {
 		rootcopy := make([]byte, len(root[:]))
@@ -118,7 +122,7 @@ func construct(pos int,
 	mask := fullMask & 0xffff
 	downmask := fullMask >> 16
 	if trace {
-		fmt.Printf("mask: %16b, down: %16b", mask, downmask)
+		fmt.Printf("pos: %d, mask: %16b, down: %16b", pos, mask, downmask)
 	}
 	if mask == 0 {
 		// short node (leaf or extension)
@@ -133,7 +137,12 @@ func construct(pos int,
 			s.Val = valueNode(values[*valueIdx])
 			(*valueIdx)++
 		} else {
-			s.Val = construct(pos+len(nKey), masks, shortKeys, values, hashes, maskIdx, shortIdx, valueIdx, hashIdx, trace)
+			if downmask == 0 {
+				s.Val = hashNode(common.CopyBytes(hashes[*hashIdx][:]))
+				(*hashIdx)++
+			} else {
+				s.Val = construct(pos+len(nKey), masks, shortKeys, values, hashes, maskIdx, shortIdx, valueIdx, hashIdx, trace)
+			}
 		}
 		return s
 	} else {
@@ -162,6 +171,9 @@ func construct(pos int,
 		}
 		for nibble := byte(0); nibble < 16; nibble++ {
 			if (downmask & (uint32(1)<<nibble)) != 0 {
+				if trace {
+					fmt.Printf("In the loop at pos: %d, mask: %16b, down: %16b, nibble %x\n", pos, mask, downmask, nibble)
+				}
 				f.Children[nibble] = construct(pos+1, masks, shortKeys, values, hashes, maskIdx, shortIdx, valueIdx, hashIdx, trace)
 			}
 		}
@@ -186,8 +198,10 @@ func NewFromProofs(bucket []byte,
 		joinGeneration: func(uint64) {},
 		leftGeneration: func(uint64) {},
 		addProof: func(prefix, key []byte, pos int, mask uint32, hashes []common.Hash) {},
+		createProof: func(prefix, key []byte, pos int) {},
 		addValue: func(prefix, key []byte, pos int, value []byte) {},
-		addShort: func(prefix, key []byte, pos int, short []byte) {},
+		addShort: func(prefix, key []byte, pos int, short []byte) bool {return false},
+		createShort: func(prefix, key []byte, pos int) {},
 	}
 	var maskIdx int
 	var hashIdx int // index in the hashes
@@ -210,14 +224,18 @@ func (t *Trie) SetResolveReads(rr bool) {
 
 func (t *Trie) MakeListed(joinGeneration, leftGeneration func (gen uint64),
 	addProof func(prefix, key []byte, pos int, mask uint32, hashes []common.Hash),
+	createProof func(prefix, key []byte, pos int),
 	addValue func(prefix, key []byte, pos int, value []byte),
-	addShort func(prefix, key []byte, pos int, short []byte),
+	addShort func(prefix, key []byte, pos int, short []byte) bool,
+	createShort func(prefix, key []byte, pos int),
 ) {
 	t.joinGeneration = joinGeneration
 	t.leftGeneration = leftGeneration
 	t.addProof = addProof
+	t.createProof = createProof
 	t.addValue = addValue
 	t.addShort = addShort
+	t.createShort = createShort
 }
 
 // NodeIterator returns an iterator that returns nodes of the trie. Iteration starts at
@@ -412,6 +430,7 @@ func (t *Trie) tryGet1(db ethdb.Database, origNode node, key []byte, pos int, bl
 		return nil, true
 	case valueNode:
 		if t.resolveReads {
+			//fmt.Printf("addValue from tryGet1 1: %x: %x\n", key[:pos], n)
 			t.addValue(t.prefix, key, pos, []byte(n))
 		}
 		return n, true
@@ -419,15 +438,36 @@ func (t *Trie) tryGet1(db ethdb.Database, origNode node, key []byte, pos int, bl
 		n.updateT(blockNr, t.joinGeneration, t.leftGeneration)
 		var adjust bool
 		nKey := compactToHex(n.Key)
+		var shortAdded bool = false
 		if t.resolveReads {
-			t.addShort(t.prefix, key, pos, nKey)
+			//fmt.Printf("addShort from tryGet1: %x, %x\n", key[:pos], nKey)
+			shortAdded = t.addShort(t.prefix, key, pos, nKey)
 		}
 		if len(key)-pos < len(nKey) || !bytes.Equal(nKey, key[pos:pos+len(nKey)]) {
+			if t.resolveReads && shortAdded {
+				proofKey := make([]byte, pos + len(nKey))
+				copy(proofKey, key[:pos])
+				copy(proofKey[pos:], nKey)
+				if v, ok := n.Val.(valueNode); ok {
+					//fmt.Printf("addValue from tryGet1 2: %x: %x\n", key[:pos], []byte(v))
+					t.addValue(t.prefix, proofKey, pos+len(nKey), []byte(v))
+				} else {
+					t.addProof(t.prefix, proofKey, pos+len(nKey), uint32(0), []common.Hash{common.BytesToHash(n.Val.hash())})
+				}
+			}
 			adjust = false
 			value, gotValue = nil, true
 		} else {
 			adjust = true
-			value, gotValue = t.tryGet1(db, n.Val, key, pos+len(nKey), blockNr)
+			if v, ok := n.Val.(valueNode); ok {
+				value, gotValue = v, true
+				if t.resolveReads && shortAdded {
+					//fmt.Printf("addValue from tryGet1 3: %x: %x\n", key[:pos], []byte(v))
+					t.addValue(t.prefix, key, pos+len(nKey), []byte(v))
+				}
+			} else {
+				value, gotValue = t.tryGet1(db, n.Val, key, pos+len(nKey), blockNr)
+			}
 		}
 		if adjust {
 			n.adjustTod(blockNr)
@@ -770,7 +810,8 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieCon
 	if len(key) == pos {
 		if v, ok := origNode.(valueNode); ok {
 			if t.resolveReads {
-				t.addValue(t.prefix, key, pos, []byte(v))
+				//fmt.Printf("addValue %x from insert\n", key[:pos])
+				//t.addValue(t.prefix, key, pos, []byte(v))
 			}
 			c.updated = !bytes.Equal(v, value.(valueNode))
 			if c.updated {
@@ -791,16 +832,18 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieCon
 	case *shortNode:
 		n.updateT(blockNr, t.joinGeneration, t.leftGeneration)
 		nKey := compactToHex(n.Key)
+		var shortAdded bool = false
 		if t.resolveReads {
-			t.addShort(t.prefix, key, pos, nKey)
+			shortAdded = t.addShort(t.prefix, key, pos, nKey)
 		}
 		matchlen := prefixLen(key[pos:], nKey)
 		// If the whole key matches, keep this short node as is
 		// and only update the value.
 		var done bool
 		if matchlen == len(nKey) {
-			if t.resolveReads {
+			if t.resolveReads && shortAdded {
 				if v, ok := n.Val.(valueNode); ok {
+					//fmt.Printf("addValue %x from insert1: %x\n", key[:pos], []byte(v))
 					t.addValue(t.prefix, key, pos+matchlen, v)
 				}
 			}
@@ -813,18 +856,28 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieCon
 			n.adjustTod(blockNr)
 		} else {
 			// Otherwise branch out at the index where they differ.
-			if t.resolveReads {
-				fmt.Printf("Short to duo, val type %T\n", n.Val)
+			if t.resolveReads && shortAdded {
+				proofKey := make([]byte, pos+len(nKey))
+				copy(proofKey, key[:pos])
+				copy(proofKey[pos:], nKey)
+				//fmt.Printf("Short to duo %x, val type %T\n", nKey, n.Val)
 				if v, ok := n.Val.(valueNode); ok {
-					t.addValue(t.prefix, key, pos+matchlen, v)
+					//fmt.Printf("addValue %x from insert2: %x\n", key[:pos], []byte(v))
+					t.addValue(t.prefix, proofKey, pos+len(nKey), v)
 				} else {
-					//t.addProof(t.prefix, key, pos+matchlen, uint32(0), []common.Hash{common.BytesToHash(n.Val.hash())})
+					t.addProof(t.prefix, proofKey, pos+len(nKey), uint32(0), []common.Hash{common.BytesToHash(n.Val.hash())})
 				}
 			}
 			var c1 node
 			if len(nKey) == matchlen+1 {
 				c1 = n.Val
 			} else {
+				if t.resolveReads {
+					proofKey := make([]byte, pos+matchlen+1)
+					copy(proofKey, key[:pos])
+					copy(proofKey, nKey[:matchlen+1])
+					t.createShort(t.prefix, proofKey, pos+matchlen+1)
+				}
 				s1 := &shortNode{Key: hexToCompact(nKey[matchlen+1:]), Val: n.Val}
 				s1.flags.dirty = true
 				s1.flags.t = blockNr
@@ -836,12 +889,18 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieCon
 			if len(key) == pos+matchlen+1 {
 				c2 = value
 			} else {
+				if t.resolveReads {
+					t.createShort(t.prefix, key, pos+matchlen+1)
+				}
 				s2 := &shortNode{Key: hexToCompact(key[pos+matchlen+1:]), Val: value}
 				s2.flags.dirty = true
 				s2.flags.t = blockNr
 				s2.adjustTod(blockNr)
 				c2 = s2
 				t.joinGeneration(blockNr)
+			}
+			if t.resolveReads {
+				t.createProof(t.prefix, key, pos)
 			}
 			branch := &duoNode{}
 			if nKey[matchlen] < key[pos+matchlen] {
@@ -888,6 +947,9 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieCon
 				if len(key) == pos+1 {
 					n.child1 = value
 				} else {
+					if t.resolveReads {
+						t.createShort(t.prefix, key, pos+1)
+					}
 					short := &shortNode{Key: hexToCompact(key[pos+1:]), Val: value}
 					short.flags.dirty = true
 					short.flags.t = blockNr
@@ -912,6 +974,9 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieCon
 				if len(key) == pos+1 {
 					n.child2 = value
 				} else {
+					if t.resolveReads {
+						t.createShort(t.prefix, key, pos+1)
+					}
 					short := &shortNode{Key: hexToCompact(key[pos+1:]), Val: value}
 					short.flags.dirty = true
 					short.flags.t = blockNr
@@ -935,6 +1000,9 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieCon
 			if len(key) == pos+1 {
 				child = value
 			} else {
+				if t.resolveReads {
+					t.createShort(t.prefix, key, pos+1)
+				}
 				short := &shortNode{Key: hexToCompact(key[pos+1:]), Val: value}
 				short.flags.dirty = true
 				short.flags.t = blockNr
@@ -971,6 +1039,9 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieCon
 			if len(key) == pos+1 {
 				n.Children[key[pos]] = value
 			} else {
+				if t.resolveReads {
+					t.createShort(t.prefix, key, pos+1)
+				}
 				short := &shortNode{Key: hexToCompact(key[pos+1:]), Val: value}
 				short.flags.dirty = true
 				short.flags.t = blockNr
