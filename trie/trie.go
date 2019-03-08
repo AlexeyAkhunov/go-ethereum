@@ -189,8 +189,8 @@ func NewFromProofs(bucket []byte,
 	values [][]byte,
 	hashes []common.Hash,
 	trace bool,
-) *Trie {
-	t := &Trie{
+) (t *Trie, mIdx, hIdx, sIdx, vIdx int) {
+	t = &Trie{
 		bucket: bucket,
 		prefix: prefix,
 		encodeToBytes: encodeToBytes,
@@ -208,7 +208,7 @@ func NewFromProofs(bucket []byte,
 	var shortIdx int // index in the shortKeys
 	var valueIdx int // inde in the values
 	t.root = construct(0, masks, shortKeys, values, hashes, &maskIdx, &shortIdx, &valueIdx, &hashIdx, trace)
-	return t
+	return t, maskIdx, hashIdx, shortIdx, valueIdx
 }
 
 func (t *Trie) SetHistorical(h bool) {
@@ -742,7 +742,10 @@ func (tc *TrieContinuation) RunWithDb(db ethdb.Database, blockNr uint64) bool {
 	switch tc.action {
 	case TrieActionInsert:
 		if tc.t.root == nil {
-			newnode := &shortNode{Key: hexToCompact(tc.key[:]), Val: tc.value}
+			if tc.t.resolveReads {
+				tc.t.createShort(tc.t.prefix, tc.key, 0)
+			}
+			newnode := &shortNode{Key: hexToCompact(tc.key), Val: tc.value}
 			newnode.flags.dirty = true
 			newnode.flags.t = blockNr
 			newnode.adjustTod(blockNr)

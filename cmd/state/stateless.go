@@ -79,8 +79,12 @@ func stateless() {
 			fmt.Printf("Failed on block %d\n", blockNum)
 		}
 		check(err)
-		masks, hashes, shortKeys, values := bc.GetTrieDbState().ExtractProofs(trace)
-		dbstate, err := state.NewStateless(preRoot, masks, hashes, shortKeys, values, block.NumberU64()-1, trace)
+		contracts, cMasks, cHashes, cShortKeys, cValues, masks, hashes, shortKeys, values := bc.GetTrieDbState().ExtractProofs(trace)
+		dbstate, err := state.NewStateless(preRoot,
+			contracts, cMasks, cHashes, cShortKeys, cValues,
+			masks, hashes, shortKeys, values,
+			block.NumberU64()-1, trace,
+		)
 		if err != nil {
 			panic(err)
 		}

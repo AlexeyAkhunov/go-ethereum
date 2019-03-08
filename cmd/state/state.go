@@ -1063,7 +1063,7 @@ func makeCreators() {
 func storageUsage() {
 	startTime := time.Now()
 	//db, err := bolt.Open("/home/akhounov/.ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	db, err := bolt.Open("/Volumes/tb4/turbo-geth/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
+	db, err := bolt.Open("/Volumes/tb41/turbo-geth-10/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
 	//db, err := bolt.Open("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
 	check(err)
 	defer db.Close()
@@ -1088,9 +1088,12 @@ func storageUsage() {
 	// Go through the current state
 	var addr common.Address
 	itemsByAddress := make(map[common.Address]int)
+	deleted := make(map[common.Address]bool) // Deleted contracts
+	numDeleted := 0
 	//itemsByCreator := make(map[common.Address]int)
 	count := 0
 	err = db.View(func(tx *bolt.Tx) error {
+		a := tx.Bucket(state.AccountsBucket)
 		b := tx.Bucket(state.StorageBucket)
 		if b == nil {
 			return nil
@@ -1098,11 +1101,22 @@ func storageUsage() {
 		c := b.Cursor()
 		for k, _ := c.First(); k != nil; k, _ = c.Next() {
 			copy(addr[:], k[:20])
+			del, ok := deleted[addr]
+			if !ok {
+				del = a.Get(crypto.Keccak256(addr[:])) == nil
+				deleted[addr] = del
+				if del {
+					numDeleted++
+				}
+			}
+			if del {
+				continue
+			}
 			itemsByAddress[addr]++
 			//itemsByCreator[creators[addr]]++
 			count++
 			if count%100000 == 0 {
-				fmt.Printf("Processed %d storage records\n", count)
+				fmt.Printf("Processed %d storage records, deleted contracts: %d\n", count, numDeleted)
 			}
 		}
 		return nil
@@ -1120,7 +1134,7 @@ func storageUsage() {
 	}
 	sort.Sort(iba)	
 	fmt.Printf("Writing dataset...\n")
-	f, err := os.Create("items_by_address.csv")
+	f, err := os.Create("/Volumes/tb41/turbo-geth/items_by_address.csv")
 	check(err)
 	defer f.Close()
 	w := bufio.NewWriter(f)

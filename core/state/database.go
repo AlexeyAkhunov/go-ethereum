@@ -248,26 +248,72 @@ func (tds *TrieDbState) TrieRoot() (common.Hash, error) {
 	return root, err
 }
 
-func (tds *TrieDbState) ExtractProofs(trace bool) (masks []uint32, hashes []common.Hash, shortKeys [][]byte, values [][]byte) {
+func (tds *TrieDbState) extractProofs(prefix []byte, trace bool) (
+	masks []uint32, hashes []common.Hash, shortKeys [][]byte, values [][]byte,
+) {
 	if trace {
-		fmt.Printf("Extracting proofs for block %d\n", tds.blockNr)
+		fmt.Printf("Extracting proofs for prefix %x\n", prefix)
+	}
+	var proofMasks map[string]uint32
+	if prefix == nil {
+		proofMasks = tds.proofMasks
+	} else {
+		var ok bool
+		ps := string(prefix)
+		proofMasks, ok = tds.sMasks[ps]
+		if !ok {
+			proofMasks = make(map[string]uint32)
+		}
+	}
+	var proofHashes map[string][16]common.Hash
+	if prefix == nil {
+		proofHashes = tds.proofHashes
+	} else {
+		var ok bool
+		ps := string(prefix)
+		proofHashes, ok = tds.sHashes[ps]
+		if !ok {
+			proofHashes = make(map[string][16]common.Hash)
+		}
+	}
+	var proofValues map[string][]byte
+	if prefix == nil {
+		proofValues = tds.proofValues
+	} else {
+		var ok bool
+		ps := string(prefix)
+		proofValues, ok = tds.sValues[ps]
+		if !ok {
+			proofValues = make(map[string][]byte)
+		}
+	}
+	var proofShorts map[string][]byte
+	if prefix == nil {
+		proofShorts = tds.proofShorts
+	} else {
+		var ok bool
+		ps := string(prefix)
+		proofShorts, ok = tds.sShorts[ps]
+		if !ok {
+			proofShorts = make(map[string][]byte)
+		}
 	}
 	// Collect all the strings
 	keys := []string{}
 	keySet := make(map[string]struct{})
-	for key := range tds.proofMasks {
+	for key := range proofMasks {
 		if _, ok := keySet[key]; !ok {
 			keys = append(keys, key)
 			keySet[key] = struct{}{}
 		}
 	}
-	for key := range tds.proofShorts {
+	for key := range proofShorts {
 		if _, ok := keySet[key]; !ok {
 			keys = append(keys, key)
 			keySet[key] = struct{}{}
 		}
 	}
-	for key := range tds.proofValues {
+	for key := range proofValues {
 		if _, ok := keySet[key]; !ok {
 			keys = append(keys, key)
 			keySet[key] = struct{}{}
@@ -278,11 +324,11 @@ func (tds *TrieDbState) ExtractProofs(trace bool) (masks []uint32, hashes []comm
 		if trace {
 			fmt.Printf("%x\n", key)
 		}
-		if mask, ok := tds.proofMasks[key]; ok {
+		if mask, ok := proofMasks[key]; ok {
 			if trace {
 				fmt.Printf("Mask %16b\n", mask)
 			}
-			h := tds.proofHashes[key]
+			h := proofHashes[key]
 			for i := byte(0); i < 16; i++ {
 				if (mask & (uint32(1) << i)) != 0 {
 					hashes = append(hashes, h[i])
@@ -300,13 +346,13 @@ func (tds *TrieDbState) ExtractProofs(trace bool) (masks []uint32, hashes []comm
 			}
 			masks = append(masks, mask | (downmask << 16))
 		}
-		if short, ok := tds.proofShorts[key]; ok {
+		if short, ok := proofShorts[key]; ok {
 			if trace {
-				fmt.Printf("Short %x\n", short)
+				fmt.Printf("Short %x: %x\n", []byte(key), short)
 			}
 			var downmask uint32
-			if h, ok1 := tds.proofHashes[key + string(short)]; ok1 {
-				if m, ok2 := tds.proofMasks[key + string(short)]; ok2 && m != 0 {
+			if h, ok1 := proofHashes[key + string(short)]; ok1 {
+				if m, ok2 := proofMasks[key + string(short)]; ok2 && m != 0 {
 					downmask = 1
 				} else {
 					hashes = append(hashes, h[0])
@@ -318,7 +364,7 @@ func (tds *TrieDbState) ExtractProofs(trace bool) (masks []uint32, hashes []comm
 			masks = append(masks, (downmask << 16))
 			shortKeys = append(shortKeys, short)
 		}
-		if value, ok := tds.proofValues[key]; ok {
+		if value, ok := proofValues[key]; ok {
 			if trace {
 				fmt.Printf("Value %x\n", value)
 			}
@@ -351,6 +397,49 @@ func (tds *TrieDbState) ExtractProofs(trace bool) (masks []uint32, hashes []comm
 		}
 		fmt.Printf("\n")
 	}
+	return masks, hashes, shortKeys, values
+}
+
+func (tds *TrieDbState) ExtractProofs(trace bool) (
+	contracts []common.Address, cMasks []uint32, cHashes []common.Hash, cShortKeys [][]byte, cValues [][]byte,
+	masks []uint32, hashes []common.Hash, shortKeys [][]byte, values [][]byte,
+) {
+	if trace {
+		fmt.Printf("Extracting proofs for block %d\n", tds.blockNr)
+	}
+	// Collect prefixes
+	prefixes := []string{}
+	prefixSet := make(map[string]struct{})
+	for prefix := range tds.sMasks {
+		if _, ok := prefixSet[prefix]; !ok {
+			prefixes = append(prefixes, prefix)
+			prefixSet[prefix] = struct{}{}
+		}
+	}
+	for prefix := range tds.sShorts {
+		if _, ok := prefixSet[prefix]; !ok {
+			prefixes = append(prefixes, prefix)
+			prefixSet[prefix] = struct{}{}
+		}
+	}
+	for prefix := range tds.sValues {
+		if _, ok := prefixSet[prefix]; !ok {
+			prefixes = append(prefixes, prefix)
+			prefixSet[prefix] = struct{}{}
+		}
+	}
+	sort.Strings(prefixes)
+	for _, prefix := range prefixes {
+		m, h, s, v := tds.extractProofs([]byte(prefix), trace)
+		if len(m) > 0 || len(h) > 0 || len(s) > 0 || len(v) > 0 {
+			contracts = append(contracts, common.BytesToAddress([]byte(prefix)))
+			cMasks = append(cMasks, m...)
+			cHashes = append(cHashes, h...)
+			cShortKeys = append(cShortKeys, s...)
+			cValues = append(cValues, v...)
+		}
+	}
+	masks, hashes, shortKeys, values = tds.extractProofs(nil, trace)
 	tds.proofMasks = make(map[string]uint32)
 	tds.sMasks = make(map[string]map[string]uint32)
 	tds.proofHashes = make(map[string][16]common.Hash)
@@ -364,7 +453,7 @@ func (tds *TrieDbState) ExtractProofs(trace bool) (masks []uint32, hashes []comm
 	tds.proofValues = make(map[string][]byte)
 	tds.sValues = make(map[string]map[string][]byte)
 	tds.proofCodes = make(map[common.Hash]struct{})
-	return masks, hashes, shortKeys, values
+	return contracts, cMasks, cHashes, cShortKeys, cValues, masks, hashes, shortKeys, values
 }
 
 func (tds *TrieDbState) PrintTrie(w io.Writer) {
@@ -692,7 +781,6 @@ func (tds *TrieDbState) addProof(prefix, key []byte, pos int, mask uint32, hashe
 			createdProofs, ok = tds.sCreatedProofs[ps]
 			if !ok {
 				createdProofs = make(map[string]struct{})
-				tds.sCreatedProofs[ps] = createdProofs
 			}
 		}
 		var proofMasks map[string]uint32
@@ -768,6 +856,9 @@ func (tds *TrieDbState) addProof(prefix, key []byte, pos int, mask uint32, hashe
 
 func (tds *TrieDbState) createProof(prefix, key []byte, pos int) {
 	if tds.resolveReads {
+		if prefix != nil {
+			fmt.Printf("createProof %x %x\n", prefix, key[:pos])
+		}
 		var createdProofs map[string]struct{}
 		if prefix == nil {
 			createdProofs = tds.createdProofs
@@ -780,9 +871,8 @@ func (tds *TrieDbState) createProof(prefix, key []byte, pos int) {
 				tds.sCreatedProofs[ps] = createdProofs
 			}
 		}
-		k := make([]byte, len(prefix) + pos)
-		copy(k, prefix)
-		copy(k[len(prefix):], key[:pos])
+		k := make([]byte, pos)
+		copy(k, key[:pos])
 		ks := string(k)
 		if _, ok := createdProofs[ks]; !ok {
 			createdProofs[ks] = struct{}{}
@@ -804,9 +894,8 @@ func (tds *TrieDbState) addValue(prefix, key []byte, pos int, value []byte) {
 				tds.sValues[ps] = proofValues
 			}
 		}
-		k := make([]byte, len(prefix) + pos)
-		copy(k, prefix)
-		copy(k[len(prefix):], key[:pos])
+		k := make([]byte, pos)
+		copy(k, key[:pos])
 		ks := string(k)
 		if _, ok := proofValues[ks]; !ok {
 			proofValues[ks] = value
@@ -816,6 +905,9 @@ func (tds *TrieDbState) addValue(prefix, key []byte, pos int, value []byte) {
 
 func (tds *TrieDbState) createShort(prefix, key []byte, pos int) {
 	if tds.resolveReads {
+		if prefix != nil {
+			fmt.Printf("createShort %x %x\n", prefix, key[:pos])
+		}
 		var createdShorts map[string]struct{}
 		if prefix == nil {
 			createdShorts = tds.createdShorts
@@ -828,9 +920,8 @@ func (tds *TrieDbState) createShort(prefix, key []byte, pos int) {
 				tds.sCreatedShorts[ps] = createdShorts
 			}
 		}
-		k := make([]byte, len(prefix) + pos)
-		copy(k, prefix)
-		copy(k[len(prefix):], key[:pos])
+		k := make([]byte, pos)
+		copy(k, key[:pos])
 		ks := string(k)
 		if _, ok := createdShorts[ks]; !ok {
 			createdShorts[ks] = struct{}{}
@@ -864,9 +955,8 @@ func (tds *TrieDbState) addShort(prefix, key []byte, pos int, short []byte) bool
 				tds.sShorts[ps] = proofShorts
 			}
 		}
-		k := make([]byte, len(prefix) + pos)
-		copy(k, prefix)
-		copy(k[len(prefix):], key[:pos])
+		k := make([]byte, pos)
+		copy(k, key[:pos])
 		ks := string(k)
 		if _, ok := createdShorts[ks]; ok {
 			return false
