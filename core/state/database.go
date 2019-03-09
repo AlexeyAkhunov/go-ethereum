@@ -340,17 +340,17 @@ func (tds *TrieDbState) extractProofs(prefix []byte, trace bool) (
 			if trace {
 				fmt.Printf("Mask %16b\n", mask)
 			}
-			h := proofHashes[key]
-			for i := byte(0); i < 16; i++ {
-				if (mask & (uint32(1) << i)) != 0 {
-					hashes = append(hashes, h[i])
-				}
-			}
 			// Determine the downward mask
 			var downmask uint32
 			for nibble := byte(0); nibble < 16; nibble++ {
 				if _, ok1 := keySet[key + string(nibble)]; ok1 {
 					downmask |= (uint32(1) << nibble)
+				}
+			}
+			h := proofHashes[key]
+			for i := byte(0); i < 16; i++ {
+				if (mask &^ downmask & (uint32(1) << i)) != 0 {
+					hashes = append(hashes, h[i])
 				}
 			}
 			if trace {
@@ -367,6 +367,9 @@ func (tds *TrieDbState) extractProofs(prefix []byte, trace bool) (
 				if _, ok2 := proofMasks[key + string(short)]; ok2 {
 					downmask = 1
 				} else {
+					if trace {
+						fmt.Printf("Sole hash: %x\n", h[0][:2])
+					}
 					hashes = append(hashes, h[0])
 				}
 			}

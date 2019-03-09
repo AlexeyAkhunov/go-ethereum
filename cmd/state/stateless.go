@@ -65,7 +65,7 @@ func stateless() {
 		if block == nil {
 			break
 		}
-		trace := blockNum == 51921
+		trace := blockNum == 55268
 		if trace {
 			filename := fmt.Sprintf("right_%d.txt", blockNum-1)
 			f, err1 := os.Create(filename)

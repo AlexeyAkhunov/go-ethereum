@@ -1190,7 +1190,7 @@ func (t *Trie) convertToShortNode(key []byte, keyStart int, child node, pos uint
 				copy(proofKey, key[:keyStart])
 				proofKey[keyStart] = byte(pos)
 				copy(proofKey[keyStart+1:], cnodeKey)
-				if v, isValue := newshort.Val.(valueNode); isValue {
+				if v, isValue := cnode.Val.(valueNode); isValue {
 					t.addValue(t.prefix, proofKey, keyStart+1+len(cnodeKey), v)
 				} else {
 					t.addProof(t.prefix, proofKey, keyStart+1+len(cnodeKey), uint32(0), []common.Hash{})
