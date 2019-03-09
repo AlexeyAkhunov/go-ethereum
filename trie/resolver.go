@@ -616,8 +616,8 @@ func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 	var err error
 	if db == nil {
 		fmt.Printf("ResolveWithDb(db=nil), tr.acounts: %t\n", tr.accounts)
-		for _, sk := range startkeys {
-			fmt.Printf("sk %x\n", sk)
+		for i, sk := range startkeys {
+			fmt.Printf("sk %x, bits: %d\n", sk, fixedbits[i])
 		}
 	}
 	if tr.accounts {

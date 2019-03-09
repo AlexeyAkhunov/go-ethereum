@@ -43,6 +43,7 @@ type Stateless struct {
 	storageTries map[common.Address]*trie.Trie
 	storageTriesF map[common.Address]*trie.Trie
 	codeMap map[common.Hash][]byte
+	trace bool
 }
 
 func NewStateless(stateRoot common.Hash,
@@ -173,6 +174,7 @@ func NewStateless(stateRoot common.Hash,
 		storageTries: storageTries,
 		storageTriesF: storageTriesF,
 		codeMap: codeMap,
+		trace: trace,
 	}, nil
 }
 
@@ -321,10 +323,14 @@ func (s *Stateless) WriteAccountStorage(address common.Address, key, original, v
 		return err
 	}
 	if len(v) == 0 {
-		//fmt.Printf("Deleted %x\n", (*key)[:])
+		if s.trace {
+			fmt.Printf("Deleted %x\n", secKey[:])
+		}
 		err = t.TryDelete(nil, secKey[:], s.blockNr)
 	} else {
-		//fmt.Printf("Updated %x to %x\n", (*key)[:], (*value)[:])
+		if s.trace {
+			fmt.Printf("Updated %x to %x\n", secKey[:], (*value)[:])
+		}
 		err = t.TryUpdate(nil, secKey[:], vv, s.blockNr)
 	}
 	return err
