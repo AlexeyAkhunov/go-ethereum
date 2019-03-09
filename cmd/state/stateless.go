@@ -65,18 +65,19 @@ func stateless() {
 		if block == nil {
 			break
 		}
-		trace := blockNum == 55268
+		trace := blockNum == 113809
 		if trace {
 			filename := fmt.Sprintf("right_%d.txt", blockNum-1)
 			f, err1 := os.Create(filename)
 			if err1 == nil {
 				defer f.Close()
 				bc.GetTrieDbState().PrintTrie(f)
+				//bc.GetTrieDbState().PrintStorageTrie(f, common.BytesToHash(common.FromHex("0x1570aaebc55e1a8067cc4a5c3ba451d196bf91544f183168b51bb1d306bda995")))
 			}
 		}
 		_, err = bc.InsertChain(types.Blocks{block})
 		if err != nil {
-			fmt.Printf("Failed on block %d\n", blockNum)
+			panic(fmt.Sprintf("Failed on block %d, error: %v\n", blockNum, err))
 		}
 		check(err)
 		contracts, cMasks, cHashes, cShortKeys, cValues, codes, masks, hashes, shortKeys, values := bc.GetTrieDbState().ExtractProofs(trace)
@@ -130,10 +131,10 @@ func stateless() {
 		fmt.Fprintf(w, "%d,%d,%d\n", blockNum, len(slt.accountsWriteSet), len(slt.storageWriteSet))
 		*/
 		blockNum++
-		if blockNum == 100000 {
+		if blockNum == 200000 {
 			break
 		}
-		if blockNum > 0 || (blockNum % 1000 == 0) {
+		if blockNum > 100000 || (blockNum % 1000 == 0) {
 			fmt.Printf("Processed %d blocks\n", blockNum)
 		}
 		// Check for interrupts

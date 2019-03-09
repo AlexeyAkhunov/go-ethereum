@@ -67,6 +67,7 @@ type Trie struct {
 	joinGeneration  func(gen uint64)
 	leftGeneration  func(gen uint64)
 	addProof        func(prefix, key []byte, pos int, mask uint32, hashes []common.Hash)
+	addSoleHash     func(prefix, key []byte, pos int, hash common.Hash)
 	createProof     func(prefix, key []byte, pos int)
 	addValue        func(prefix, key []byte, pos int, value []byte)
 	addShort        func(prefix, key []byte, pos int, short []byte) bool
@@ -97,6 +98,7 @@ func New(root common.Hash, bucket []byte, prefix []byte, encodeToBytes bool) *Tr
 		joinGeneration: func(uint64) {},
 		leftGeneration: func(uint64) {},
 		addProof: func(prefix, key []byte, pos int, mask uint32, hashes []common.Hash) {},
+		addSoleHash: func(prefix, key []byte, pos int, hash common.Hash) {},
 		createProof: func(prefix, key []byte, pos int) {},
 		addValue: func(prefix, key []byte, pos int, value []byte) {},
 		addShort: func(prefix, key []byte, pos int, short []byte) bool {return false},
@@ -206,6 +208,7 @@ func NewFromProofs(bucket []byte,
 		joinGeneration: func(uint64) {},
 		leftGeneration: func(uint64) {},
 		addProof: func(prefix, key []byte, pos int, mask uint32, hashes []common.Hash) {},
+		addSoleHash: func(prefix, key []byte, pos int, hash common.Hash) {},
 		createProof: func(prefix, key []byte, pos int) {},
 		addValue: func(prefix, key []byte, pos int, value []byte) {},
 		addShort: func(prefix, key []byte, pos int, short []byte) bool {return false},
@@ -235,6 +238,7 @@ func (t *Trie) SetResolveReads(rr bool) {
 
 func (t *Trie) MakeListed(joinGeneration, leftGeneration func (gen uint64),
 	addProof func(prefix, key []byte, pos int, mask uint32, hashes []common.Hash),
+	addSoleHash func(prefix, key []byte, pos int, hash common.Hash),
 	createProof func(prefix, key []byte, pos int),
 	addValue func(prefix, key []byte, pos int, value []byte),
 	addShort func(prefix, key []byte, pos int, short []byte) bool,
@@ -243,6 +247,7 @@ func (t *Trie) MakeListed(joinGeneration, leftGeneration func (gen uint64),
 	t.joinGeneration = joinGeneration
 	t.leftGeneration = leftGeneration
 	t.addProof = addProof
+	t.addSoleHash = addSoleHash
 	t.createProof = createProof
 	t.addValue = addValue
 	t.addShort = addShort
@@ -272,6 +277,9 @@ func (t *Trie) TryGet(db ethdb.Database, key []byte, blockNr uint64) (value []by
 	k := keybytesToHex(key)
 	value, gotValue := t.tryGet1(db, t.root, k, 0, blockNr)
 	if !gotValue {
+		if db == nil {
+			fmt.Printf("TryGet(db) %x\n", key)
+		}
 		value, err = t.tryGet(db, t.root, key, 0, blockNr)
 	}
 	return value, err
@@ -463,7 +471,7 @@ func (t *Trie) tryGet1(db ethdb.Database, origNode node, key []byte, pos int, bl
 					//fmt.Printf("addValue from tryGet1 2: %x: %x\n", key[:pos], []byte(v))
 					t.addValue(t.prefix, proofKey, pos+len(nKey), []byte(v))
 				} else {
-					t.addProof(t.prefix, proofKey, pos+len(nKey), uint32(0), []common.Hash{common.BytesToHash(n.Val.hash())})
+					t.addSoleHash(t.prefix, proofKey, pos+len(nKey), common.BytesToHash(n.Val.hash()))
 				}
 			}
 			adjust = false
@@ -520,6 +528,7 @@ func (t *Trie) tryGet1(db ethdb.Database, origNode node, key []byte, pos int, bl
 		return
 	case hashNode:
 		if t.resolveReads {
+			//fmt.Printf("resolve Read %x %x\n", t.prefix, key[:pos])
 			nd, err := t.resolveHash(db, n, key, pos, blockNr)
 			if err != nil {
 				panic(err)
@@ -835,7 +844,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieCon
 			}
 			return true
 		} else if t.resolveReads {
-			t.addProof(t.prefix, key, pos, uint32(0), []common.Hash{common.BytesToHash(origNode.hash())})
+			t.addSoleHash(t.prefix, key, pos, common.BytesToHash(origNode.hash()))
 		}
 		c.touched = append(c.touched, Touch{n: value, key: key, pos: pos})
 		c.updated = true
@@ -879,7 +888,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieCon
 					//fmt.Printf("addValue %x from insert2: %x\n", key[:pos], []byte(v))
 					t.addValue(t.prefix, proofKey, pos+len(nKey), v)
 				} else {
-					t.addProof(t.prefix, proofKey, pos+len(nKey), uint32(0), []common.Hash{common.BytesToHash(n.Val.hash())})
+					t.addSoleHash(t.prefix, proofKey, pos+len(nKey), common.BytesToHash(n.Val.hash()))
 				}
 			}
 			var c1 node
@@ -1168,17 +1177,17 @@ func (t *Trie) convertToShortNode(key []byte, keyStart int, child node, pos uint
 			c.resolveKey = nil
 			c.resolvePos = 0
 		}
-		if cnode, ok := cnode.(*shortNode); ok {
-			c.touched = append(c.touched, Touch{n: cnode, key: rkey, pos: keyStart+1})
-			cnodeKey := compactToHex(cnode.Key)
+		if short, ok := cnode.(*shortNode); ok {
+			c.touched = append(c.touched, Touch{n: short, key: rkey, pos: keyStart+1})
+			cnodeKey := compactToHex(short.Key)
 			k := append([]byte{byte(pos)}, cnodeKey...)
 			if t.resolveReads {
 				t.addShort(t.prefix, rkey, keyStart+1, cnodeKey)
 				t.createShort(t.prefix, key, keyStart)
 			}
 			newshort := &shortNode{Key: hexToCompact(k)}
-			t.leftGeneration(cnode.flags.t)
-			newshort.Val = cnode.Val
+			t.leftGeneration(short.flags.t)
+			newshort.Val = short.Val
 			newshort.flags.dirty = true
 			newshort.flags.t = blockNr
 			newshort.adjustTod(blockNr)
@@ -1190,13 +1199,26 @@ func (t *Trie) convertToShortNode(key []byte, keyStart int, child node, pos uint
 				copy(proofKey, key[:keyStart])
 				proofKey[keyStart] = byte(pos)
 				copy(proofKey[keyStart+1:], cnodeKey)
-				if v, isValue := cnode.Val.(valueNode); isValue {
+				if v, isValue := short.Val.(valueNode); isValue {
 					t.addValue(t.prefix, proofKey, keyStart+1+len(cnodeKey), v)
 				} else {
-					t.addProof(t.prefix, proofKey, keyStart+1+len(cnodeKey), uint32(0), []common.Hash{})
+					t.addSoleHash(t.prefix, proofKey, keyStart+1+len(cnodeKey), common.BytesToHash(short.Val.hash()))
 				}
 			}
 			return done
+		} else {
+			switch n := cnode.(type) {
+			case *duoNode:
+				if t.resolveReads {
+					t.addProof(t.prefix, rkey, keyStart+1, n.mask, n.hashesExcept(17))
+				}
+			case *fullNode:
+				if t.resolveReads {
+					t.addProof(t.prefix, rkey, keyStart+1, n.mask(), n.hashesExcept(17))
+				}
+			default:
+				panic("")
+			}
 		}
 	}
 	// Otherwise, n is replaced by a one-nibble short node

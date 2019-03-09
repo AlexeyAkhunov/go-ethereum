@@ -614,6 +614,12 @@ func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 	defer returnHasherToPool(tr.h)
 	startkeys, fixedbits := tr.PrepareResolveParams()
 	var err error
+	if db == nil {
+		fmt.Printf("ResolveWithDb(db=nil), tr.acounts: %t\n", tr.accounts)
+		for _, sk := range startkeys {
+			fmt.Printf("sk %x\n", sk)
+		}
+	}
 	if tr.accounts {
 		if tr.historical {
 			err = db.MultiWalkAsOf([]byte("AT"), []byte("hAT"), startkeys, fixedbits, blockNr+1, tr.Walker)

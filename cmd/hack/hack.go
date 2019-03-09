@@ -1533,7 +1533,7 @@ func main() {
  	//testRedis()
  	//upgradeBlocks()
  	//compareTries()
- 	invTree("root", "right", "diff", *block, false)
+ 	invTree("root", "right", "diff", *block, true)
  	//invTree("iw", "ir", "id", *block, true)
  	//loadAccount()
  	//preimage()

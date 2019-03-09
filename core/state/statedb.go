@@ -595,14 +595,14 @@ func (self *StateDB) GetRefund() uint64 {
 
 type Addresses []common.Address
 
-func (a Addresses) Len() int {
-	return len(a)
+func (a *Addresses) Len() int {
+	return len(*a)
 }
-func (a Addresses) Less(i, j int) bool {
-	return bytes.Compare(a[i][:], a[j][:]) == -1
+func (a *Addresses) Less(i, j int) bool {
+	return bytes.Compare((*a)[i][:], (*a)[j][:]) == -1
 }
-func (a Addresses) Swap(i, j int) {
-	a[i], a[j] = a[j], a[i]
+func (a *Addresses) Swap(i, j int) {
+	(*a)[i], (*a)[j] = (*a)[j], (*a)[i]
 }
 
 func (s *StateDB) Finalise(deleteEmptyObjects bool, stateWriter StateWriter) error {
@@ -612,7 +612,7 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool, stateWriter StateWriter) err
 		a[i] = addr
 		i++
 	}
-	sort.Sort(a)
+	sort.Sort(&a)
 	for _, addr := range a {
 		stateObject, exist := s.stateObjects[addr]
 		if !exist {
@@ -657,7 +657,7 @@ func (s *StateDB) Commit(deleteEmptyObjects bool, stateWriter StateWriter) error
 		a[i] = addr
 		i++
 	}
-	sort.Sort(a)
+	sort.Sort(&a)
 	for _, addr := range a {
 		stateObject, _ := s.stateObjects[addr]
 		_, isDirty := s.stateObjectsDirty[addr]
