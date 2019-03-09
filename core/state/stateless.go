@@ -41,6 +41,7 @@ type Stateless struct {
 	blockNr uint64
 	t *trie.Trie
 	storageTries map[common.Address]*trie.Trie
+	codeMap map[common.Hash][]byte
 }
 
 func NewStateless(stateRoot common.Hash,
@@ -49,6 +50,7 @@ func NewStateless(stateRoot common.Hash,
 	cHashes []common.Hash,
 	cShortKeys [][]byte,
 	cValues [][]byte,
+	codes [][]byte,
 	masks []uint32,
 	hashes []common.Hash,
 	shortKeys [][]byte,
@@ -76,6 +78,17 @@ func NewStateless(stateRoot common.Hash,
 		hashIdx += hIdx
 		valueIdx += vIdx
 	}
+	codeMap := make(map[common.Hash][]byte)
+	codeMap[common.BytesToHash(emptyCodeHash)] = []byte{}
+	h := newHasher()
+	defer returnHasherToPool(h)
+	var codeHash common.Hash
+	for _, code := range codes {
+		h.sha.Reset()
+		h.sha.Write(code)
+		h.sha.Read(codeHash[:])
+		codeMap[codeHash] = code
+	}
 	return &Stateless {
 		stateRoot: stateRoot,
 		masks: masks,
@@ -85,6 +98,7 @@ func NewStateless(stateRoot common.Hash,
 		blockNr: blockNr,
 		t: t,
 		storageTries: storageTries,
+		codeMap: codeMap,
 	}, nil
 }
 
@@ -109,15 +123,7 @@ func (s *Stateless) ReadAccountData(address common.Address) (*Account, error) {
 func (s *Stateless) getStorageTrie(address common.Address, create bool) (*trie.Trie, error) {
 	t, ok := s.storageTries[address]
 	if !ok && create {
-		account, err := s.ReadAccountData(address)
-		if err != nil {
-			return nil, err
-		}
-		if account == nil {
-			t = trie.New(common.Hash{}, StorageBucket, address[:], true)
-		} else {
-			t = trie.New(account.Root, StorageBucket, address[:], true)
-		}
+		t = trie.New(common.Hash{}, StorageBucket, address[:], true)
 		s.storageTries[address] = t
 	}
 	return t, nil
@@ -130,14 +136,14 @@ func (s *Stateless) ReadAccountStorage(address common.Address, key *common.Hash)
 		return nil, err
 	}
 	if t == nil {
-		return []byte{}, nil
+		return nil, nil
 	}
 	h := newHasher()
 	defer returnHasherToPool(h)
 	h.sha.Reset()
 	h.sha.Write((*key)[:])
 	var secKey common.Hash
-	h.sha.Read(secKey[:]) 
+	h.sha.Read(secKey[:])
 	enc, err := t.TryGet(nil, secKey[:], s.blockNr)
 	if err != nil {
 		return nil, err
@@ -147,19 +153,15 @@ func (s *Stateless) ReadAccountStorage(address common.Address, key *common.Hash)
 
 func (s *Stateless) ReadAccountCode(codeHash common.Hash) ([]byte, error) {
 	fmt.Printf("ReadAccountCode\n")
-	return nil, nil
+	return s.codeMap[codeHash], nil
 }
 
 func (s *Stateless) ReadAccountCodeSize(codeHash common.Hash) (int, error) {
 	fmt.Printf("ReadAccountCodeSize\n")
-	return 0, nil
+	return len(s.codeMap[codeHash]), nil
 }
 
 func (s *Stateless) UpdateAccountData(address common.Address, original, account *Account) error {
-	// Don't write historical record if the account did not change
-	if accountsEqual(original, account) {
-		return nil
-	}
 	h := newHasher()
 	defer returnHasherToPool(h)
 	h.sha.Reset()
@@ -172,6 +174,7 @@ func (s *Stateless) UpdateAccountData(address common.Address, original, account 
 			return err
 		}
 		if storageTrie != nil {
+			fmt.Printf("Updating account.Root of %x with %x, emptyRoot: %x\n", address, storageTrie.Hash(), emptyRoot)
 			account.Root = storageTrie.Hash()
 		}
 		data, err := rlp.EncodeToBytes(account)
@@ -207,11 +210,19 @@ func (s *Stateless) CheckRoot(expected common.Hash) error {
 
 func (s *Stateless) UpdateAccountCode(codeHash common.Hash, code []byte) error {
 	fmt.Printf("UpdateAccountCode\n")
+	s.codeMap[codeHash] = common.CopyBytes(code)
 	return nil
 }
 
 func (s *Stateless) DeleteAccount(address common.Address, original *Account) error {
-	return nil
+	h := newHasher()
+	defer returnHasherToPool(h)
+	h.sha.Reset()
+	h.sha.Write(address[:])
+	var addrHash common.Hash
+	h.sha.Read(addrHash[:])
+	err := s.t.TryDelete(nil, addrHash[:], s.blockNr)
+	return err
 }
 
 func (s *Stateless) WriteAccountStorage(address common.Address, key, original, value *common.Hash) error {
@@ -233,8 +244,10 @@ func (s *Stateless) WriteAccountStorage(address common.Address, key, original, v
 		return err
 	}
 	if len(v) == 0 {
+		fmt.Printf("Deleted %x\n", (*key)[:])
 		err = t.TryDelete(nil, secKey[:], s.blockNr)
 	} else {
+		fmt.Printf("Updated %x to %x\n", (*key)[:], (*value)[:])
 		err = t.TryUpdate(nil, secKey[:], vv, s.blockNr)
 	}
 	return err

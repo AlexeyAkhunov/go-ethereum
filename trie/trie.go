@@ -25,6 +25,7 @@ import (
 	"io"
 	"runtime/debug"
 	"strconv"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -122,7 +123,7 @@ func construct(pos int,
 	mask := fullMask & 0xffff
 	downmask := fullMask >> 16
 	if trace {
-		fmt.Printf("pos: %d, mask: %16b, down: %16b", pos, mask, downmask)
+		fmt.Printf("%spos: %d, mask: %16b, down: %16b", strings.Repeat(" ", pos), pos, mask, downmask)
 	}
 	if mask == 0 {
 		// short node (leaf or extension)
@@ -137,7 +138,13 @@ func construct(pos int,
 			s.Val = valueNode(values[*valueIdx])
 			(*valueIdx)++
 		} else {
+			if trace {
+				fmt.Printf("%spos = %d, len(nKey) = %d, nKey = %x\n", strings.Repeat(" ", pos), pos, len(nKey), nKey)
+			}
 			if downmask == 0 {
+				if trace {
+					fmt.Printf("%shash: %x\n", strings.Repeat(" ", pos), hashes[*hashIdx][:2])
+				}
 				s.Val = hashNode(common.CopyBytes(hashes[*hashIdx][:]))
 				(*hashIdx)++
 			} else {
@@ -146,8 +153,9 @@ func construct(pos int,
 		}
 		return s
 	} else {
+		mask &^= downmask
 		if trace {
-			fmt.Printf(", hashes:")
+			fmt.Printf("%s, hashes:", strings.Repeat(" ", pos), )
 		}
 		// Make a full node
 		f := &fullNode{}
@@ -172,7 +180,7 @@ func construct(pos int,
 		for nibble := byte(0); nibble < 16; nibble++ {
 			if (downmask & (uint32(1)<<nibble)) != 0 {
 				if trace {
-					fmt.Printf("In the loop at pos: %d, mask: %16b, down: %16b, nibble %x\n", pos, mask, downmask, nibble)
+					fmt.Printf("%sIn the loop at pos: %d, mask: %16b, down: %16b, nibble %x\n", strings.Repeat(" ", pos), pos, fullMask & 0xffff, downmask, nibble)
 				}
 				f.Children[nibble] = construct(pos+1, masks, shortKeys, values, hashes, maskIdx, shortIdx, valueIdx, hashIdx, trace)
 			}
@@ -207,6 +215,9 @@ func NewFromProofs(bucket []byte,
 	var hashIdx int // index in the hashes
 	var shortIdx int // index in the shortKeys
 	var valueIdx int // inde in the values
+	if trace {
+		fmt.Printf("\n")
+	}
 	t.root = construct(0, masks, shortKeys, values, hashes, &maskIdx, &shortIdx, &valueIdx, &hashIdx, trace)
 	return t, maskIdx, hashIdx, shortIdx, valueIdx
 }
@@ -878,7 +889,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieCon
 				if t.resolveReads {
 					proofKey := make([]byte, pos+matchlen+1)
 					copy(proofKey, key[:pos])
-					copy(proofKey, nKey[:matchlen+1])
+					copy(proofKey[pos:], nKey[:matchlen+1])
 					t.createShort(t.prefix, proofKey, pos+matchlen+1)
 				}
 				s1 := &shortNode{Key: hexToCompact(nKey[matchlen+1:]), Val: n.Val}
@@ -1159,7 +1170,12 @@ func (t *Trie) convertToShortNode(key []byte, keyStart int, child node, pos uint
 		}
 		if cnode, ok := cnode.(*shortNode); ok {
 			c.touched = append(c.touched, Touch{n: cnode, key: rkey, pos: keyStart+1})
-			k := append([]byte{byte(pos)}, compactToHex(cnode.Key)...)
+			cnodeKey := compactToHex(cnode.Key)
+			k := append([]byte{byte(pos)}, cnodeKey...)
+			if t.resolveReads {
+				t.addShort(t.prefix, rkey, keyStart+1, cnodeKey)
+				t.createShort(t.prefix, key, keyStart)
+			}
 			newshort := &shortNode{Key: hexToCompact(k)}
 			t.leftGeneration(cnode.flags.t)
 			newshort.Val = cnode.Val
@@ -1170,14 +1186,14 @@ func (t *Trie) convertToShortNode(key []byte, keyStart int, child node, pos uint
 			c.updated = true
 			c.n = newshort
 			if t.resolveReads && done {
-				t.addShort(t.prefix, key, keyStart, k)
-				proofKey := make([]byte, len(key))
+				proofKey := make([]byte, keyStart+1+len(cnodeKey))
 				copy(proofKey, key[:keyStart])
-				copy(proofKey[keyStart:], k)
+				proofKey[keyStart] = byte(pos)
+				copy(proofKey[keyStart+1:], cnodeKey)
 				if v, isValue := newshort.Val.(valueNode); isValue {
-					t.addValue(t.prefix, proofKey, keyStart+len(k), v)
+					t.addValue(t.prefix, proofKey, keyStart+1+len(cnodeKey), v)
 				} else {
-					t.addProof(t.prefix, proofKey, keyStart+len(k), uint32(0), []common.Hash{})
+					t.addProof(t.prefix, proofKey, keyStart+1+len(cnodeKey), uint32(0), []common.Hash{})
 				}
 			}
 			return done
@@ -1185,6 +1201,9 @@ func (t *Trie) convertToShortNode(key []byte, keyStart int, child node, pos uint
 	}
 	// Otherwise, n is replaced by a one-nibble short node
 	// containing the child.
+	if t.resolveReads {
+		t.createShort(t.prefix, key, keyStart)
+	}
 	newshort := &shortNode{Key: hexToCompact([]byte{byte(pos)})}
 	newshort.Val = cnode
 	newshort.flags.dirty = true
@@ -1192,6 +1211,7 @@ func (t *Trie) convertToShortNode(key []byte, keyStart int, child node, pos uint
 	newshort.adjustTod(blockNr)
 	c.updated = true
 	c.n = newshort
+	/*
 	if t.resolveReads && done {
 		t.addShort(t.prefix, key, keyStart, []byte{byte(pos)})
 		proofKey := make([]byte, len(key))
@@ -1203,6 +1223,7 @@ func (t *Trie) convertToShortNode(key []byte, keyStart int, child node, pos uint
 			t.addProof(t.prefix, proofKey, keyStart+1, uint32(0), []common.Hash{})
 		}
 	}
+	*/
 	return done
 }
 
@@ -1252,6 +1273,9 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, c *TrieContinuati
 						// avoid modifying n.Key since it might be shared with
 						// other nodes.
 						childKey := compactToHex(shortChild.Key)
+						if t.resolveReads {
+							t.createShort(t.prefix, key, keyStart)
+						}
 						newnode := &shortNode{Key: hexToCompact(concat(nKey, childKey...))}
 						newnode.Val = shortChild.Val
 						newnode.flags.dirty = true

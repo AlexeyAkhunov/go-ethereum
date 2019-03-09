@@ -151,6 +151,7 @@ type TrieDbState struct {
 	proofValues      map[string][]byte
 	sValues          map[string]map[string][]byte
 	proofCodes       map[common.Hash]struct{}
+	createdCodes     map[common.Hash]struct{}
 }
 
 func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
@@ -184,6 +185,7 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 		proofValues: make(map[string][]byte),
 		sValues: make(map[string]map[string][]byte),
 		proofCodes: make(map[common.Hash]struct{}),
+		createdCodes: make(map[common.Hash]struct{}),
 		codeCache: cc,
 		codeSizeCache: csc,
 	}
@@ -230,6 +232,7 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 		proofValues: make(map[string][]byte),
 		sValues: make(map[string]map[string][]byte),
 		proofCodes: make(map[common.Hash]struct{}),
+		createdCodes: make(map[common.Hash]struct{}),
 	}
 	return &cpy
 }
@@ -253,6 +256,15 @@ func (tds *TrieDbState) extractProofs(prefix []byte, trace bool) (
 ) {
 	if trace {
 		fmt.Printf("Extracting proofs for prefix %x\n", prefix)
+		if prefix != nil {
+			h := newHasher()
+			defer returnHasherToPool(h)
+			h.sha.Reset()
+			h.sha.Write(prefix)
+			var buf common.Hash
+			h.sha.Read(buf[:])
+			fmt.Printf("prefix hash: %x\n", buf)
+		}
 	}
 	var proofMasks map[string]uint32
 	if prefix == nil {
@@ -344,7 +356,7 @@ func (tds *TrieDbState) extractProofs(prefix []byte, trace bool) (
 			if trace {
 				fmt.Printf("Down %16b\n", downmask)
 			}
-			masks = append(masks, mask | (downmask << 16))
+			masks = append(masks, mask | downmask | (downmask << 16))
 		}
 		if short, ok := proofShorts[key]; ok {
 			if trace {
@@ -352,7 +364,7 @@ func (tds *TrieDbState) extractProofs(prefix []byte, trace bool) (
 			}
 			var downmask uint32
 			if h, ok1 := proofHashes[key + string(short)]; ok1 {
-				if m, ok2 := proofMasks[key + string(short)]; ok2 && m != 0 {
+				if _, ok2 := proofMasks[key + string(short)]; ok2 {
 					downmask = 1
 				} else {
 					hashes = append(hashes, h[0])
@@ -402,6 +414,7 @@ func (tds *TrieDbState) extractProofs(prefix []byte, trace bool) (
 
 func (tds *TrieDbState) ExtractProofs(trace bool) (
 	contracts []common.Address, cMasks []uint32, cHashes []common.Hash, cShortKeys [][]byte, cValues [][]byte,
+	codes [][]byte,
 	masks []uint32, hashes []common.Hash, shortKeys [][]byte, values [][]byte,
 ) {
 	if trace {
@@ -440,6 +453,11 @@ func (tds *TrieDbState) ExtractProofs(trace bool) (
 		}
 	}
 	masks, hashes, shortKeys, values = tds.extractProofs(nil, trace)
+	for codeHash := range tds.proofCodes {
+		if cached, ok := tds.codeCache.Get(codeHash); ok {
+			codes = append(codes, cached.([]byte))
+		}
+	}
 	tds.proofMasks = make(map[string]uint32)
 	tds.sMasks = make(map[string]map[string]uint32)
 	tds.proofHashes = make(map[string][16]common.Hash)
@@ -453,7 +471,8 @@ func (tds *TrieDbState) ExtractProofs(trace bool) (
 	tds.proofValues = make(map[string][]byte)
 	tds.sValues = make(map[string]map[string][]byte)
 	tds.proofCodes = make(map[common.Hash]struct{})
-	return contracts, cMasks, cHashes, cShortKeys, cValues, masks, hashes, shortKeys, values
+	tds.createdCodes = make(map[common.Hash]struct{})
+	return contracts, cMasks, cHashes, cShortKeys, cValues, codes, masks, hashes, shortKeys, values
 }
 
 func (tds *TrieDbState) PrintTrie(w io.Writer) {
@@ -864,7 +883,7 @@ func (tds *TrieDbState) createProof(prefix, key []byte, pos int) {
 			createdProofs = tds.createdProofs
 		} else {
 			var ok bool
-			ps := string(prefix)
+			ps := string(common.CopyBytes(prefix))
 			createdProofs, ok = tds.sCreatedProofs[ps]
 			if !ok {
 				createdProofs = make(map[string]struct{})
@@ -887,7 +906,7 @@ func (tds *TrieDbState) addValue(prefix, key []byte, pos int, value []byte) {
 			proofValues = tds.proofValues
 		} else {
 			var ok bool
-			ps := string(prefix)
+			ps := string(common.CopyBytes(prefix))
 			proofValues, ok = tds.sValues[ps]
 			if !ok {
 				proofValues = make(map[string][]byte)
@@ -898,7 +917,7 @@ func (tds *TrieDbState) addValue(prefix, key []byte, pos int, value []byte) {
 		copy(k, key[:pos])
 		ks := string(k)
 		if _, ok := proofValues[ks]; !ok {
-			proofValues[ks] = value
+			proofValues[ks] = common.CopyBytes(value)
 		}
 	}
 }
@@ -913,7 +932,7 @@ func (tds *TrieDbState) createShort(prefix, key []byte, pos int) {
 			createdShorts = tds.createdShorts
 		} else {
 			var ok bool
-			ps := string(prefix)
+			ps := string(common.CopyBytes(prefix))
 			createdShorts, ok = tds.sCreatedShorts[ps]
 			if !ok {
 				createdShorts = make(map[string]struct{})
@@ -936,7 +955,7 @@ func (tds *TrieDbState) addShort(prefix, key []byte, pos int, short []byte) bool
 			createdShorts = tds.createdShorts
 		} else {
 			var ok bool
-			ps := string(prefix)
+			ps := string(common.CopyBytes(prefix))
 			createdShorts, ok = tds.sCreatedShorts[ps]
 			if !ok {
 				createdShorts = make(map[string]struct{})
@@ -948,7 +967,7 @@ func (tds *TrieDbState) addShort(prefix, key []byte, pos int, short []byte) bool
 			proofShorts = tds.proofShorts
 		} else {
 			var ok bool
-			ps := string(prefix)
+			ps := string(common.CopyBytes(prefix))
 			proofShorts, ok = tds.sShorts[ps]
 			if !ok {
 				proofShorts = make(map[string][]byte)
@@ -1057,7 +1076,9 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, key *common.H
 
 func (tds *TrieDbState) ReadAccountCode(codeHash common.Hash) ([]byte, error) {
 	if tds.resolveReads {
-		tds.proofCodes[codeHash] = struct{}{}
+		if _, ok := tds.createdCodes[codeHash]; !ok {
+			tds.proofCodes[codeHash] = struct{}{}
+		}
 	}
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
@@ -1075,7 +1096,9 @@ func (tds *TrieDbState) ReadAccountCode(codeHash common.Hash) ([]byte, error) {
 
 func (tds *TrieDbState) ReadAccountCodeSize(codeHash common.Hash) (int, error) {
 	if tds.resolveReads {
-		tds.proofCodes[codeHash] = struct{}{}
+		if _, ok := tds.createdCodes[codeHash]; !ok {
+			tds.proofCodes[codeHash] = struct{}{}
+		}
 	}
 	if cached, ok := tds.codeSizeCache.Get(codeHash); ok {
 		return cached.(int), nil
@@ -1237,6 +1260,11 @@ func (dsw *DbStateWriter) DeleteAccount(address common.Address, original *Accoun
 }
 
 func (tsw *TrieStateWriter) UpdateAccountCode(codeHash common.Hash, code []byte) error {
+	if tsw.tds.resolveReads {
+		if _, ok := tsw.tds.createdCodes[codeHash]; !ok {
+			tsw.tds.createdCodes[codeHash] = struct{}{}
+		}
+	}
 	return nil
 }
 

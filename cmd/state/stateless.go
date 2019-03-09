@@ -65,7 +65,7 @@ func stateless() {
 		if block == nil {
 			break
 		}
-		trace := blockNum == 49018
+		trace := blockNum == 51921
 		if trace {
 			filename := fmt.Sprintf("right_%d.txt", blockNum-1)
 			f, err1 := os.Create(filename)
@@ -79,9 +79,10 @@ func stateless() {
 			fmt.Printf("Failed on block %d\n", blockNum)
 		}
 		check(err)
-		contracts, cMasks, cHashes, cShortKeys, cValues, masks, hashes, shortKeys, values := bc.GetTrieDbState().ExtractProofs(trace)
+		contracts, cMasks, cHashes, cShortKeys, cValues, codes, masks, hashes, shortKeys, values := bc.GetTrieDbState().ExtractProofs(trace)
 		dbstate, err := state.NewStateless(preRoot,
 			contracts, cMasks, cHashes, cShortKeys, cValues,
+			codes,
 			masks, hashes, shortKeys, values,
 			block.NumberU64()-1, trace,
 		)
@@ -132,9 +133,9 @@ func stateless() {
 		if blockNum == 100000 {
 			break
 		}
-		//if blockNum % 1000 == 0 {
+		if blockNum > 0 || (blockNum % 1000 == 0) {
 			fmt.Printf("Processed %d blocks\n", blockNum)
-		//}
+		}
 		// Check for interrupts
 		select {
 		case interrupt = <-interruptCh:
