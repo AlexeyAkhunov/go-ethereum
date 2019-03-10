@@ -65,7 +65,7 @@ func stateless() {
 		if block == nil {
 			break
 		}
-		trace := blockNum == 116525
+		trace := false //blockNum == 116525
 		if trace {
 			filename := fmt.Sprintf("right_%d.txt", blockNum-1)
 			f, err1 := os.Create(filename)
@@ -101,7 +101,7 @@ func stateless() {
 			//context := core.NewEVMContext(msg, block.Header(), bc, nil)
 			// Not yet the searched for transaction, execute on top of the current state
 			//vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
-			receipt, _, err := core.ApplyTransaction(chainConfig, bcb, nil, gp, statedb, state.NewNoopWriter(), header, tx, usedGas, vmConfig)
+			receipt, _, err := core.ApplyTransaction(chainConfig, bcb, nil, gp, statedb, dbstate, header, tx, usedGas, vmConfig)
 			if err != nil {
 				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
 			}
@@ -131,10 +131,10 @@ func stateless() {
 		fmt.Fprintf(w, "%d,%d,%d\n", blockNum, len(slt.accountsWriteSet), len(slt.storageWriteSet))
 		*/
 		blockNum++
-		if blockNum == 200000 {
+		if blockNum == 300000 {
 			break
 		}
-		if blockNum > 100000 || (blockNum % 1000 == 0) {
+		if blockNum > 200000 || (blockNum % 1000 == 0) {
 			fmt.Printf("Processed %d blocks\n", blockNum)
 		}
 		// Check for interrupts

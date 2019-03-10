@@ -209,6 +209,9 @@ func (s *Stateless) UpdateAccountData(address common.Address, original, account 
 	var addrHash common.Hash
 	h.sha.Read(addrHash[:])
 	s.accountUpdates[addrHash] = account
+	if s.trace {
+		fmt.Printf("UpdateeAccount %x, hash %x\n", address, addrHash)
+	}
 	return nil
 }
 
@@ -313,7 +316,9 @@ func (s *Stateless) DeleteAccount(address common.Address, original *Account) err
 	h.sha.Read(addrHash[:])
 	s.accountUpdates[addrHash] = nil
 	s.deleted[addrHash] = struct{}{}
-	//fmt.Printf("DeleteAccount %x, hash %x\n", address, addrHash)
+	if s.trace {
+		fmt.Printf("DeleteAccount %x, hash %x\n", address, addrHash)
+	}
 	return nil
 }
 
