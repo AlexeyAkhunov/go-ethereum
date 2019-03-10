@@ -606,14 +606,7 @@ func (a *Addresses) Swap(i, j int) {
 }
 
 func (s *StateDB) Finalise(deleteEmptyObjects bool, stateWriter StateWriter) error {
-	a := make(Addresses, len(s.journal.dirties))
-	var i int
-	for addr := range s.journal.dirties {
-		a[i] = addr
-		i++
-	}
-	sort.Sort(&a)
-	for _, addr := range a {
+	for addr, _ := range s.journal.dirties {
 		stateObject, exist := s.stateObjects[addr]
 		if !exist {
 			// ripeMD is 'touched' at block 1714175, in tx 0x1237f737031e40bcde4a8b7e717b2d15e3ecadfe49bb1bbc71ee9deb09c6fcf2
@@ -651,15 +644,7 @@ func (s *StateDB) Commit(deleteEmptyObjects bool, stateWriter StateWriter) error
 	for addr := range s.journal.dirties {
 		s.stateObjectsDirty[addr] = struct{}{}
 	}
-	a := make(Addresses, len(s.stateObjects))
-	var i int
-	for addr := range s.stateObjects {
-		a[i] = addr
-		i++
-	}
-	sort.Sort(&a)
-	for _, addr := range a {
-		stateObject, _ := s.stateObjects[addr]
+	for addr, stateObject := range s.stateObjects {
 		_, isDirty := s.stateObjectsDirty[addr]
 		//fmt.Printf("%x %d %x %x\n", addr[:], stateObject.data.Balance, stateObject.data.CodeHash, stateObject.data.Root[:])
 

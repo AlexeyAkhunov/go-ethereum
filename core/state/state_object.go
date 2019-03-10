@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	"sort"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -222,15 +221,7 @@ func (a *Hashes) Swap(i, j int) {
 
 // updateTrie writes cached storage modifications into the object's storage trie.
 func (self *stateObject) updateTrie(stateWriter StateWriter) error {
-	b := make(Hashes, len(self.dirtyStorage))
-	var i int
-	for key := range self.dirtyStorage {
-		b[i] = key
-		i++
-	}
-	sort.Sort(&b)
-	for _, key := range b {
-		value := self.dirtyStorage[key]
+	for key, value := range self.dirtyStorage {
 		original := self.blockOriginStorage[key]
 		self.originStorage[key] = value
 		if err := stateWriter.WriteAccountStorage(self.address, &key, &original, &value); err != nil {

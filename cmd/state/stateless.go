@@ -31,7 +31,8 @@ func stateless() {
 	}()
 
 	//ethDb, err := ethdb.NewLDBDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
-	ethDb, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	//ethDb, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	ethDb, err := ethdb.NewLDBDatabase("//home/akhounov/.ethereum/geth/chaindata")
 	check(err)
 	defer ethDb.Close()
 	chainConfig := params.MainnetChainConfig
@@ -65,7 +66,7 @@ func stateless() {
 		if block == nil {
 			break
 		}
-		trace := blockNum == 843551
+		trace := false//blockNum == 843551
 		if trace {
 			filename := fmt.Sprintf("right_%d.txt", blockNum-1)
 			f, err1 := os.Create(filename)
@@ -127,14 +128,31 @@ func stateless() {
 			panic(err)
 		}
 		preRoot = header.Root
-		/*
-		fmt.Fprintf(w, "%d,%d,%d\n", blockNum, len(slt.accountsWriteSet), len(slt.storageWriteSet))
-		*/
+		var totalCShorts, totalCValues, totalCodes, totalShorts, totalValues int
+		for _, short := range cShortKeys {
+			totalCShorts += len(short)
+		}
+		for _, value := range cValues {
+			totalCValues += len(value)
+		}
+		for _, code := range codes {
+			totalCodes += len(code)
+		}
+		for _, short := range shortKeys {
+			totalShorts += len(short)
+		}
+		for _, value := range values {
+			totalValues += len(value)
+		}
+		fmt.Fprintf(w, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
+			blockNum, len(contracts), len(cMasks), len(cHashes), len(cShortKeys), len(cValues), len(codes),
+			len(masks), len(hashes), len(shortKeys), len(values),
+		)
 		blockNum++
 		if blockNum == 300000 {
 			//break
 		}
-		if blockNum > 843000 || (blockNum % 1000 == 0) {
+		if /*blockNum > 843000 || */(blockNum % 1000 == 0) {
 			fmt.Printf("Processed %d blocks\n", blockNum)
 		}
 		// Check for interrupts
