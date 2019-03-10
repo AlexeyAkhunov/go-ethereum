@@ -65,7 +65,7 @@ func stateless() {
 		if block == nil {
 			break
 		}
-		trace := false //blockNum == 116525
+		trace := blockNum == 843551
 		if trace {
 			filename := fmt.Sprintf("right_%d.txt", blockNum-1)
 			f, err1 := os.Create(filename)
@@ -132,9 +132,9 @@ func stateless() {
 		*/
 		blockNum++
 		if blockNum == 300000 {
-			break
+			//break
 		}
-		if blockNum > 200000 || (blockNum % 1000 == 0) {
+		if blockNum > 843000 || (blockNum % 1000 == 0) {
 			fmt.Printf("Processed %d blocks\n", blockNum)
 		}
 		// Check for interrupts

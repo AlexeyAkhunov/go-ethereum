@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"sort"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/rlp"
@@ -218,15 +217,8 @@ func (s *Stateless) UpdateAccountData(address common.Address, original, account 
 func (s *Stateless) CheckRoot(expected common.Hash) error {
 	h := newHasher()
 	defer returnHasherToPool(h)
-	ss := make(Addresses, len(s.storageUpdates))
-	var i int
-	for addr := range s.storageUpdates {
-		ss[i] = addr
-		i++
-	}
-	sort.Sort(&ss)
-	for _, address := range ss {
-		m := s.storageUpdates[address]
+	// Process updates first, deletes next
+	for address, m := range s.storageUpdates {
 		h.sha.Reset()
 		h.sha.Write(address[:])
 		var addrHash common.Hash
@@ -235,40 +227,34 @@ func (s *Stateless) CheckRoot(expected common.Hash) error {
 		if err != nil {
 			return err
 		}
-		b := make(Hashes, len(m))
-		var i int
-		for key := range m {
-			b[i] = key
-			i++
-		}
-		sort.Sort(&b)
-		for _, keyHash := range b {
-			v := m[keyHash]
-			if len(v) == 0 {
-				if err := t.TryDelete(nil, keyHash[:], s.blockNr); err != nil {
-					return err
-				}
-			} else {
+		for keyHash, v := range m {
+			if len(v) != 0 {
 				if err := t.TryUpdate(nil, keyHash[:], v, s.blockNr); err != nil {
 					return err
 				}
 			}
 		}
 	}
-	a := make(Hashes, len(s.accountUpdates))
-	var j int
-	for addrHash := range s.accountUpdates {
-		a[j] = addrHash
-		j++
-	}
-	sort.Sort(&a)
-	for _, addrHash := range a {
-		account := s.accountUpdates[addrHash]
-		if account == nil {
-			if err := s.t.TryDelete(nil, addrHash[:], s.blockNr); err != nil {
-				return err
+	for address, m := range s.storageUpdates {
+		h.sha.Reset()
+		h.sha.Write(address[:])
+		var addrHash common.Hash
+		h.sha.Read(addrHash[:])
+		t, err := s.getStorageTrie(address, addrHash, true)
+		if err != nil {
+			return err
+		}
+		for keyHash, v := range m {
+			if len(v) == 0 {
+				if err := t.TryDelete(nil, keyHash[:], s.blockNr); err != nil {
+					return err
+				}
 			}
-		} else {
+		}
+	}
+	// First process updates, then deletes
+	for addrHash, account := range s.accountUpdates {
+		if account != nil {
 			storageTrie, err := s.getStorageTrie(common.Address{}, addrHash, false)
 			if err != nil {
 				return err
@@ -284,6 +270,13 @@ func (s *Stateless) CheckRoot(expected common.Hash) error {
 				return err
 			}
 			if err := s.t.TryUpdate(nil, addrHash[:], data, s.blockNr); err != nil {
+				return err
+			}
+		}
+	}
+	for addrHash, account := range s.accountUpdates {
+		if account == nil {
+			if err := s.t.TryDelete(nil, addrHash[:], s.blockNr); err != nil {
 				return err
 			}
 		}
@@ -342,5 +335,8 @@ func (s *Stateless) WriteAccountStorage(address common.Address, key, original, v
 	vv := make([]byte, len(v))
 	copy(vv, v)
 	m[secKey] = vv
+	if s.trace {
+		fmt.Printf("WriteAccountStorage addr %x, keyHash %x, value %x\n", address, secKey, vv)
+	}
 	return nil
 }
