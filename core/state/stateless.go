@@ -46,6 +46,7 @@ type Stateless struct {
 	trace bool
 	storageUpdates map[common.Address]map[common.Hash][]byte
 	accountUpdates map[common.Hash]*Account
+	deleted map[common.Hash]struct{}
 }
 
 func NewStateless(stateRoot common.Hash,
@@ -133,6 +134,7 @@ func NewStateless(stateRoot common.Hash,
 		trace: trace,
 		storageUpdates: make(map[common.Address]map[common.Hash][]byte),
 		accountUpdates: make(map[common.Hash]*Account),
+		deleted: make(map[common.Hash]struct{}),
 	}, nil
 }
 
@@ -268,7 +270,9 @@ func (s *Stateless) CheckRoot(expected common.Hash) error {
 			if err != nil {
 				return err
 			}
-			if storageTrie != nil {
+			if _, ok := s.deleted[addrHash]; ok {
+				account.Root = emptyRoot
+			} else if storageTrie != nil {
 				//fmt.Printf("Updating account.Root of %x with %x, emptyRoot: %x\n", address, storageTrie.Hash(), emptyRoot)
 				account.Root = storageTrie.Hash()
 			}
@@ -308,6 +312,7 @@ func (s *Stateless) DeleteAccount(address common.Address, original *Account) err
 	var addrHash common.Hash
 	h.sha.Read(addrHash[:])
 	s.accountUpdates[addrHash] = nil
+	s.deleted[addrHash] = struct{}{}
 	//fmt.Printf("DeleteAccount %x, hash %x\n", address, addrHash)
 	return nil
 }
