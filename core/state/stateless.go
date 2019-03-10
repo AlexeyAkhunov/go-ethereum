@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"sort"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/rlp"
@@ -39,11 +40,12 @@ type Stateless struct {
 	shortKeys [][]byte
 	values [][]byte
 	blockNr uint64
-	t, tF *trie.Trie
-	storageTries map[common.Address]*trie.Trie
-	storageTriesF map[common.Address]*trie.Trie
+	t *trie.Trie
+	storageTries map[common.Hash]*trie.Trie
 	codeMap map[common.Hash][]byte
 	trace bool
+	storageUpdates map[common.Address]map[common.Hash][]byte
+	accountUpdates map[common.Hash]*Account
 }
 
 func NewStateless(stateRoot common.Hash,
@@ -66,7 +68,6 @@ func NewStateless(stateRoot common.Hash,
 		fmt.Printf("ACCOUNT TRIE ==============================================\n")
 	}
 	t, _, _, _, _ := trie.NewFromProofs(AccountsBucket, nil, false, masks, shortKeys, values, hashes, trace)
-	tF, _, _, _, _ := trie.NewFromProofs(AccountsBucket, nil, false, masks, shortKeys, values, hashes, trace)
 	if stateRoot != t.Hash() {
 		filename := fmt.Sprintf("root_%d.txt", blockNr)
 		f, err := os.Create(filename)
@@ -76,28 +77,18 @@ func NewStateless(stateRoot common.Hash,
 		}
 		return nil, fmt.Errorf("Expected root: %x, Constructed root: %x", stateRoot, t.Hash())
 	}
-	if stateRoot != tF.Hash() {
-		filename := fmt.Sprintf("root_%d.txt", blockNr)
-		f, err := os.Create(filename)
-		if err == nil {
-			defer f.Close()
-			tF.Print(f)
-		}
-		return nil, fmt.Errorf("(F)Expected root: %x, Constructed root: %x", stateRoot, t.Hash())
-	}
-	storageTries := make(map[common.Address]*trie.Trie)
-	storageTriesF := make(map[common.Address]*trie.Trie)
+	storageTries := make(map[common.Hash]*trie.Trie)
 	var maskIdx, hashIdx, shortIdx, valueIdx int
 	for _, contract := range contracts {
 		if trace {
 			fmt.Printf("TRIE %x ==============================================\n", contract)
 		}
 		st, mIdx, hIdx, sIdx, vIdx := trie.NewFromProofs(StorageBucket, nil, true, cMasks[maskIdx:], cShortKeys[shortIdx:], cValues[valueIdx:], cHashes[hashIdx:], trace)
-		storageTries[contract] = st
 		h.sha.Reset()
 		h.sha.Write(contract[:])
 		var addrHash common.Hash
 		h.sha.Read(addrHash[:])
+		storageTries[addrHash] = st
 		enc, err := t.TryGet(nil,  addrHash[:], blockNr)
 		if err != nil {
 			return nil, err
@@ -114,39 +105,6 @@ func NewStateless(stateRoot common.Hash,
 				st.Print(f)
 			}
 			return nil, fmt.Errorf("Expected storage root: %x, constructed root: %x", account.Root, st.Hash())
-		}
-		maskIdx += mIdx
-		shortIdx += sIdx
-		hashIdx += hIdx
-		valueIdx += vIdx
-	}
-	maskIdx = 0
-	hashIdx = 0
-	shortIdx = 0
-	valueIdx = 0
-	for _, contract := range contracts {
-		st, mIdx, hIdx, sIdx, vIdx := trie.NewFromProofs(StorageBucket, nil, true, cMasks[maskIdx:], cShortKeys[shortIdx:], cValues[valueIdx:], cHashes[hashIdx:], trace)
-		storageTriesF[contract] = st
-		h.sha.Reset()
-		h.sha.Write(contract[:])
-		var addrHash common.Hash
-		h.sha.Read(addrHash[:])
-		enc, err := t.TryGet(nil,  addrHash[:], blockNr)
-		if err != nil {
-			return nil, err
-		}
-		account, err := encodingToAccount(enc)
-		if err != nil {
-			return nil, err
-		}
-		if account.Root != st.Hash() {
-			filename := fmt.Sprintf("root_%d.txt", blockNr)
-			f, err := os.Create(filename)
-			if err == nil {
-				defer f.Close()
-				st.Print(f)
-			}
-			return nil, fmt.Errorf("(F)Expected storage root: %x, constructed root: %x", account.Root, st.Hash())
 		}
 		maskIdx += mIdx
 		shortIdx += sIdx
@@ -170,11 +128,11 @@ func NewStateless(stateRoot common.Hash,
 		values: values,
 		blockNr: blockNr,
 		t: t,
-		tF: tF,
 		storageTries: storageTries,
-		storageTriesF: storageTriesF,
 		codeMap: codeMap,
 		trace: trace,
+		storageUpdates: make(map[common.Address]map[common.Hash][]byte),
+		accountUpdates: make(map[common.Hash]*Account),
 	}, nil
 }
 
@@ -196,35 +154,30 @@ func (s *Stateless) ReadAccountData(address common.Address) (*Account, error) {
 	return encodingToAccount(enc)
 }
 
-func (s *Stateless) getStorageTrie(address common.Address, create bool) (*trie.Trie, error) {
-	t, ok := s.storageTries[address]
+func (s *Stateless) getStorageTrie(address common.Address, addrHash common.Hash, create bool) (*trie.Trie, error) {
+	t, ok := s.storageTries[addrHash]
 	if !ok && create {
 		t = trie.New(common.Hash{}, StorageBucket, address[:], true)
-		s.storageTries[address] = t
-	}
-	return t, nil
-}
-
-func (s *Stateless) getStorageTrieF(address common.Address, create bool) (*trie.Trie, error) {
-	t, ok := s.storageTriesF[address]
-	if !ok && create {
-		t = trie.New(common.Hash{}, StorageBucket, address[:], true)
-		s.storageTriesF[address] = t
+		s.storageTries[addrHash] = t
 	}
 	return t, nil
 }
 
 func (s *Stateless) ReadAccountStorage(address common.Address, key *common.Hash) ([]byte, error) {
 	//fmt.Printf("ReadAccountStorage\n")
-	t, err := s.getStorageTrie(address, false)
+	h := newHasher()
+	defer returnHasherToPool(h)
+	h.sha.Reset()
+	h.sha.Write(address[:])
+	var addrHash common.Hash
+	h.sha.Read(addrHash[:])
+	t, err := s.getStorageTrie(common.Address{}, addrHash, false)
 	if err != nil {
 		return nil, err
 	}
 	if t == nil {
 		return nil, nil
 	}
-	h := newHasher()
-	defer returnHasherToPool(h)
 	h.sha.Reset()
 	h.sha.Write((*key)[:])
 	var secKey common.Hash
@@ -253,33 +206,88 @@ func (s *Stateless) UpdateAccountData(address common.Address, original, account 
 	h.sha.Write(address[:])
 	var addrHash common.Hash
 	h.sha.Read(addrHash[:])
-	storageTrie, err := s.getStorageTrieF(address, false)
-	if err != nil {
-		return err
-	}
-	if storageTrie != nil {
-		//fmt.Printf("Updating account.Root of %x with %x, emptyRoot: %x\n", address, storageTrie.Hash(), emptyRoot)
-		account.Root = storageTrie.Hash()
-	}
-	data, err := rlp.EncodeToBytes(account)
-	if err != nil {
-		return err
-	}
-	err = s.tF.TryUpdate(nil, addrHash[:], data, s.blockNr)
-	if err != nil {
-		return err
-	}
+	s.accountUpdates[addrHash] = account
 	return nil
 }
 
 func (s *Stateless) CheckRoot(expected common.Hash) error {
-	myRoot := s.tF.Hash()
+	h := newHasher()
+	defer returnHasherToPool(h)
+	ss := make(Addresses, len(s.storageUpdates))
+	var i int
+	for addr := range s.storageUpdates {
+		ss[i] = addr
+		i++
+	}
+	sort.Sort(&ss)
+	for _, address := range ss {
+		m := s.storageUpdates[address]
+		h.sha.Reset()
+		h.sha.Write(address[:])
+		var addrHash common.Hash
+		h.sha.Read(addrHash[:])
+		t, err := s.getStorageTrie(address, addrHash, true)
+		if err != nil {
+			return err
+		}
+		b := make(Hashes, len(m))
+		var i int
+		for key := range m {
+			b[i] = key
+			i++
+		}
+		sort.Sort(&b)
+		for _, keyHash := range b {
+			v := m[keyHash]
+			if len(v) == 0 {
+				if err := t.TryDelete(nil, keyHash[:], s.blockNr); err != nil {
+					return err
+				}
+			} else {
+				if err := t.TryUpdate(nil, keyHash[:], v, s.blockNr); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	a := make(Hashes, len(s.accountUpdates))
+	var j int
+	for addrHash := range s.accountUpdates {
+		a[j] = addrHash
+		j++
+	}
+	sort.Sort(&a)
+	for _, addrHash := range a {
+		account := s.accountUpdates[addrHash]
+		if account == nil {
+			if err := s.t.TryDelete(nil, addrHash[:], s.blockNr); err != nil {
+				return err
+			}
+		} else {
+			storageTrie, err := s.getStorageTrie(common.Address{}, addrHash, false)
+			if err != nil {
+				return err
+			}
+			if storageTrie != nil {
+				//fmt.Printf("Updating account.Root of %x with %x, emptyRoot: %x\n", address, storageTrie.Hash(), emptyRoot)
+				account.Root = storageTrie.Hash()
+			}
+			data, err := rlp.EncodeToBytes(account)
+			if err != nil {
+				return err
+			}
+			if err := s.t.TryUpdate(nil, addrHash[:], data, s.blockNr); err != nil {
+				return err
+			}
+		}
+	}
+	myRoot := s.t.Hash()
 	if myRoot != expected {
 		filename := fmt.Sprintf("root_%d.txt", s.blockNr+1)
 		f, err := os.Create(filename)
 		if err == nil {
 			defer f.Close()
-			s.tF.Print(f)
+			s.t.Print(f)
 		}
 		return fmt.Errorf("Final root: %x, expected: %x", myRoot, expected)
 	}
@@ -299,12 +307,17 @@ func (s *Stateless) DeleteAccount(address common.Address, original *Account) err
 	h.sha.Write(address[:])
 	var addrHash common.Hash
 	h.sha.Read(addrHash[:])
+	s.accountUpdates[addrHash] = nil
 	//fmt.Printf("DeleteAccount %x, hash %x\n", address, addrHash)
-	err := s.tF.TryDelete(nil, addrHash[:], s.blockNr)
-	return err
+	return nil
 }
 
 func (s *Stateless) WriteAccountStorage(address common.Address, key, original, value *common.Hash) error {
+	m, ok := s.storageUpdates[address]
+	if !ok {
+		m = make(map[common.Hash][]byte)
+		s.storageUpdates[address] = m
+	}
 	//fmt.Printf("WriteAccountStorage\n")
 	//if *original == *value {
 	//	return nil
@@ -318,20 +331,6 @@ func (s *Stateless) WriteAccountStorage(address common.Address, key, original, v
 	v := bytes.TrimLeft(value[:], "\x00")
 	vv := make([]byte, len(v))
 	copy(vv, v)
-	t, err := s.getStorageTrieF(address, true)
-	if err != nil {
-		return err
-	}
-	if len(v) == 0 {
-		if s.trace {
-			fmt.Printf("Deleted %x\n", secKey[:])
-		}
-		err = t.TryDelete(nil, secKey[:], s.blockNr)
-	} else {
-		if s.trace {
-			fmt.Printf("Updated %x to %x\n", secKey[:], (*value)[:])
-		}
-		err = t.TryUpdate(nil, secKey[:], vv, s.blockNr)
-	}
-	return err
+	m[secKey] = vv
+	return nil
 }

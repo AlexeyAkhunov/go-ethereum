@@ -1182,7 +1182,10 @@ func (t *Trie) convertToShortNode(key []byte, keyStart int, child node, pos uint
 			cnodeKey := compactToHex(short.Key)
 			k := append([]byte{byte(pos)}, cnodeKey...)
 			if t.resolveReads {
-				t.addShort(t.prefix, rkey, keyStart+1, cnodeKey)
+				//fmt.Printf("addShort %x: %x\n", rkey, cnodeKey)
+				if t.addShort(t.prefix, rkey, keyStart+1, cnodeKey) {
+					//fmt.Printf("done\n")
+				}
 				t.createShort(t.prefix, key, keyStart)
 			}
 			newshort := &shortNode{Key: hexToCompact(k)}
