@@ -10,6 +10,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
+	"github.com/ethereum/go-ethereum/consensus/misc"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -96,6 +97,9 @@ func stateless() {
 		header := block.Header()
 		usedGas := new(uint64)
 		var receipts types.Receipts
+		if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
+			misc.ApplyDAOHardFork(statedb)
+		}
 		for _, tx := range block.Transactions() {
 			// Assemble the transaction call message and return if the requested offset
 			//msg, _ := tx.AsMessage(signer)
