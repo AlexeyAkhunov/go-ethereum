@@ -90,7 +90,7 @@ func stateless() {
 			block.NumberU64()-1, trace,
 		)
 		if err != nil {
-			panic(err)
+			fmt.Printf("Error making state for block %d: %v\n", err)
 		}
 		statedb := state.New(dbstate)
 		gp := new(core.GasPool).AddGas(block.GasLimit())
@@ -129,7 +129,7 @@ func stateless() {
 				defer f.Close()
 				bc.GetTrieDbState().PrintTrie(f)
 			}
-			panic(err)
+			fmt.Printf("Error processing block %d: %v\n", blockNum, err)
 		}
 		preRoot = header.Root
 		var totalCShorts, totalCValues, totalCodes, totalShorts, totalValues int
