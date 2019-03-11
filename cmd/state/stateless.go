@@ -148,9 +148,9 @@ func stateless() {
 		for _, value := range values {
 			totalValues += len(value)
 		}
-		fmt.Fprintf(w, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
+		fmt.Fprintf(w, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
 			blockNum, len(contracts), len(cMasks), len(cHashes), len(cShortKeys), len(cValues), len(codes),
-			len(masks), len(hashes), len(shortKeys), len(values),
+			len(masks), len(hashes), len(shortKeys), len(values), totalCShorts, totalValues, totalCodes, totalShorts, totalValues,
 		)
 		blockNum++
 		if blockNum == 300000 {
