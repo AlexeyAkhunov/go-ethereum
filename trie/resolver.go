@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"time"
-	"sync/atomic"
+	//"sync/atomic"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -289,6 +289,7 @@ func (tr *TrieResolver) PrepareResolveParams() ([][]byte, []uint) {
 			fixedbits = append(fixedbits, uint(4*c.extResolvePos))
 			prevC = c
 			//c.Print()
+			/*
 			if !tr.accounts {
 				switch c.resolvePos {
 					case 0:
@@ -359,6 +360,7 @@ func (tr *TrieResolver) PrepareResolveParams() ([][]byte, []uint) {
 					atomic.AddUint32(&resolvedLevelS8, 0),
 				)
 			}
+			*/
 		}
 	}
 	tr.startLevel = tr.continuations[0].extResolvePos
