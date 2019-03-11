@@ -101,26 +101,18 @@ func stateless() {
 			misc.ApplyDAOHardFork(statedb)
 		}
 		for _, tx := range block.Transactions() {
-			// Assemble the transaction call message and return if the requested offset
-			//msg, _ := tx.AsMessage(signer)
-			//context := core.NewEVMContext(msg, block.Header(), bc, nil)
-			// Not yet the searched for transaction, execute on top of the current state
-			//vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
 			receipt, _, err := core.ApplyTransaction(chainConfig, bc, nil, gp, statedb, dbstate, header, tx, usedGas, vmConfig)
 			if err != nil {
 				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
 			}
 			receipts = append(receipts, receipt)
-			//if _, _, _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
-			//	panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
-			//}
 		}
 		// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
 		_, err = engine.Finalize(bcb, header, statedb, block.Transactions(), block.Uncles(), receipts)
 		if err != nil {
 			panic(fmt.Errorf("Finalize of block %d failed: %v", blockNum, err))
 		}
-		statedb.Commit(chainConfig.IsEIP158(header.Number), dbstate)
+		statedb.Finalise(chainConfig.IsEIP158(header.Number), dbstate)
 		err = dbstate.CheckRoot(header.Root)
 		if err != nil {
 			filename := fmt.Sprintf("right_%d.txt", blockNum)
