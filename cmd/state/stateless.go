@@ -33,12 +33,12 @@ func stateless() {
 
 	//ethDb, err := ethdb.NewLDBDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
 	//ethDb, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
-	ethDb, err := ethdb.NewLDBDatabase("/home/akhounov/.ethereum/geth/chaindata")
+	ethDb, err := ethdb.NewLDBDatabase("/home/akhounov/.ethereum/geth/chaindata1")
 	check(err)
 	defer ethDb.Close()
 	chainConfig := params.MainnetChainConfig
 	//slFile, err := os.OpenFile("/Volumes/tb4/turbo-geth/stateless.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
-	slFile, err := os.OpenFile("stateless.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	slFile, err := os.OpenFile("stateless1.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	check(err)
 	defer slFile.Close()
 	w := bufio.NewWriter(slFile)
@@ -82,71 +82,73 @@ func stateless() {
 			panic(fmt.Sprintf("Failed on block %d, error: %v\n", blockNum, err))
 		}
 		check(err)
-		contracts, cMasks, cHashes, cShortKeys, cValues, codes, masks, hashes, shortKeys, values := bc.GetTrieDbState().ExtractProofs(trace)
-		dbstate, err := state.NewStateless(preRoot,
-			contracts, cMasks, cHashes, cShortKeys, cValues,
-			codes,
-			masks, hashes, shortKeys, values,
-			block.NumberU64()-1, trace,
-		)
-		if err != nil {
-			fmt.Printf("Error making state for block %d: %v\n", err)
-		}
-		statedb := state.New(dbstate)
-		gp := new(core.GasPool).AddGas(block.GasLimit())
 		header := block.Header()
-		usedGas := new(uint64)
-		var receipts types.Receipts
-		if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
-			misc.ApplyDAOHardFork(statedb)
-		}
-		for _, tx := range block.Transactions() {
-			receipt, _, err := core.ApplyTransaction(chainConfig, bc, nil, gp, statedb, dbstate, header, tx, usedGas, vmConfig)
+		if blockNum >= 2378500 {
+			contracts, cMasks, cHashes, cShortKeys, cValues, codes, masks, hashes, shortKeys, values := bc.GetTrieDbState().ExtractProofs(trace)
+			dbstate, err := state.NewStateless(preRoot,
+				contracts, cMasks, cHashes, cShortKeys, cValues,
+				codes,
+				masks, hashes, shortKeys, values,
+				block.NumberU64()-1, trace,
+			)
 			if err != nil {
-				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
+				fmt.Printf("Error making state for block %d: %v\n", err)
 			}
-			receipts = append(receipts, receipt)
-		}
-		// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-		_, err = engine.Finalize(bcb, header, statedb, block.Transactions(), block.Uncles(), receipts)
-		if err != nil {
-			panic(fmt.Errorf("Finalize of block %d failed: %v", blockNum, err))
-		}
-		statedb.Finalise(chainConfig.IsEIP158(header.Number), dbstate)
-		err = dbstate.CheckRoot(header.Root)
-		if err != nil {
-			filename := fmt.Sprintf("right_%d.txt", blockNum)
-			f, err1 := os.Create(filename)
-			if err1 == nil {
-				defer f.Close()
-				bc.GetTrieDbState().PrintTrie(f)
+			statedb := state.New(dbstate)
+			gp := new(core.GasPool).AddGas(block.GasLimit())
+			usedGas := new(uint64)
+			var receipts types.Receipts
+			if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
+				misc.ApplyDAOHardFork(statedb)
 			}
-			fmt.Printf("Error processing block %d: %v\n", blockNum, err)
+			for _, tx := range block.Transactions() {
+				receipt, _, err := core.ApplyTransaction(chainConfig, bc, nil, gp, statedb, dbstate, header, tx, usedGas, vmConfig)
+				if err != nil {
+					panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
+				}
+				receipts = append(receipts, receipt)
+			}
+			// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
+			_, err = engine.Finalize(bcb, header, statedb, block.Transactions(), block.Uncles(), receipts)
+			if err != nil {
+				panic(fmt.Errorf("Finalize of block %d failed: %v", blockNum, err))
+			}
+			statedb.Finalise(chainConfig.IsEIP158(header.Number), dbstate)
+			err = dbstate.CheckRoot(header.Root)
+			if err != nil {
+				filename := fmt.Sprintf("right_%d.txt", blockNum)
+				f, err1 := os.Create(filename)
+				if err1 == nil {
+					defer f.Close()
+					bc.GetTrieDbState().PrintTrie(f)
+				}
+				fmt.Printf("Error processing block %d: %v\n", blockNum, err)
+			}
+			var totalCShorts, totalCValues, totalCodes, totalShorts, totalValues int
+			for _, short := range cShortKeys {
+				totalCShorts += len(short)
+			}
+			for _, value := range cValues {
+				totalCValues += len(value)
+			}
+			for _, code := range codes {
+				totalCodes += len(code)
+			}
+			for _, short := range shortKeys {
+				totalShorts += len(short)
+			}
+			for _, value := range values {
+				totalValues += len(value)
+			}
+			fmt.Fprintf(w, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
+				blockNum, len(contracts), len(cMasks), len(cHashes), len(cShortKeys), len(cValues), len(codes),
+				len(masks), len(hashes), len(shortKeys), len(values), totalCShorts, totalValues, totalCodes, totalShorts, totalValues,
+			)
 		}
 		preRoot = header.Root
-		var totalCShorts, totalCValues, totalCodes, totalShorts, totalValues int
-		for _, short := range cShortKeys {
-			totalCShorts += len(short)
-		}
-		for _, value := range cValues {
-			totalCValues += len(value)
-		}
-		for _, code := range codes {
-			totalCodes += len(code)
-		}
-		for _, short := range shortKeys {
-			totalShorts += len(short)
-		}
-		for _, value := range values {
-			totalValues += len(value)
-		}
-		fmt.Fprintf(w, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
-			blockNum, len(contracts), len(cMasks), len(cHashes), len(cShortKeys), len(cValues), len(codes),
-			len(masks), len(hashes), len(shortKeys), len(values), totalCShorts, totalValues, totalCodes, totalShorts, totalValues,
-		)
 		blockNum++
-		if blockNum == 300000 {
-			//break
+		if blockNum == 2416461 {
+			break
 		}
 		if /*blockNum > 843000 || */(blockNum % 1000 == 0) {
 			fmt.Printf("Processed %d blocks\n", blockNum)

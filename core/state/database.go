@@ -152,7 +152,7 @@ type TrieDbState struct {
 	sCreatedShorts   map[string]map[string]struct{}
 	proofValues      map[string][]byte
 	sValues          map[string]map[string][]byte
-	proofCodes       map[common.Hash]struct{}
+	proofCodes       map[common.Hash][]byte
 	createdCodes     map[common.Hash]struct{}
 }
 
@@ -188,7 +188,7 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 		sCreatedShorts: make(map[string]map[string]struct{}),
 		proofValues: make(map[string][]byte),
 		sValues: make(map[string]map[string][]byte),
-		proofCodes: make(map[common.Hash]struct{}),
+		proofCodes: make(map[common.Hash][]byte),
 		createdCodes: make(map[common.Hash]struct{}),
 		codeCache: cc,
 		codeSizeCache: csc,
@@ -237,7 +237,7 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 		sCreatedShorts: make(map[string]map[string]struct{}),
 		proofValues: make(map[string][]byte),
 		sValues: make(map[string]map[string][]byte),
-		proofCodes: make(map[common.Hash]struct{}),
+		proofCodes: make(map[common.Hash][]byte),
 		createdCodes: make(map[common.Hash]struct{}),
 	}
 	return &cpy
@@ -471,10 +471,8 @@ func (tds *TrieDbState) ExtractProofs(trace bool) (
 		}
 	}
 	masks, hashes, shortKeys, values = tds.extractProofs(nil, trace)
-	for codeHash := range tds.proofCodes {
-		if cached, ok := tds.codeCache.Get(codeHash); ok {
-			codes = append(codes, cached.([]byte))
-		}
+	for _, code := range tds.proofCodes {
+		codes = append(codes, code)
 	}
 	tds.proofMasks = make(map[string]uint32)
 	tds.sMasks = make(map[string]map[string]uint32)
@@ -490,7 +488,7 @@ func (tds *TrieDbState) ExtractProofs(trace bool) (
 	tds.sCreatedShorts = make(map[string]map[string]struct{})
 	tds.proofValues = make(map[string][]byte)
 	tds.sValues = make(map[string]map[string][]byte)
-	tds.proofCodes = make(map[common.Hash]struct{})
+	tds.proofCodes = make(map[common.Hash][]byte)
 	tds.createdCodes = make(map[common.Hash]struct{})
 	return contracts, cMasks, cHashes, cShortKeys, cValues, codes, masks, hashes, shortKeys, values
 }
@@ -1243,40 +1241,49 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, key *common.H
 	return enc, nil
 }
 
-func (tds *TrieDbState) ReadAccountCode(codeHash common.Hash) ([]byte, error) {
-	if tds.resolveReads {
-		if _, ok := tds.createdCodes[codeHash]; !ok {
-			tds.proofCodes[codeHash] = struct{}{}
-		}
-	}
+func (tds *TrieDbState) ReadAccountCode(codeHash common.Hash) (code []byte, err error) {
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
 	}
 	if cached, ok := tds.codeCache.Get(codeHash); ok {
-		return cached.([]byte), nil
+		code, err = cached.([]byte), nil
+	} else {
+		code, err = tds.db.Get(CodeBucket, codeHash[:])
+		if err == nil {
+			tds.codeSizeCache.Add(codeHash, len(code))
+			tds.codeCache.Add(codeHash, code)
+		}
 	}
-	code, err := tds.db.Get(CodeBucket, codeHash[:])
-	if err == nil {
-		tds.codeSizeCache.Add(codeHash, len(code))
-		tds.codeCache.Add(codeHash, code)
+	if tds.resolveReads {
+		if _, ok := tds.createdCodes[codeHash]; !ok {
+			tds.proofCodes[codeHash] = code
+		}
 	}
 	return code, err
 }
 
-func (tds *TrieDbState) ReadAccountCodeSize(codeHash common.Hash) (int, error) {
+func (tds *TrieDbState) ReadAccountCodeSize(codeHash common.Hash) (codeSize int, err error) {
+	var code []byte
+	if cached, ok := tds.codeSizeCache.Get(codeHash); ok {
+		codeSize, err = cached.(int), nil
+		if tds.resolveReads {
+			if cachedCode, ok := tds.codeCache.Get(codeHash); ok {
+				code, err = cachedCode.([]byte), nil
+			}
+		}
+	} else {
+		code, err = tds.ReadAccountCode(codeHash)
+		if err != nil {
+			return 0, err
+		}
+		codeSize = len(code)
+	}
 	if tds.resolveReads {
 		if _, ok := tds.createdCodes[codeHash]; !ok {
-			tds.proofCodes[codeHash] = struct{}{}
+			tds.proofCodes[codeHash] = code
 		}
 	}
-	if cached, ok := tds.codeSizeCache.Get(codeHash); ok {
-		return cached.(int), nil
-	}
-	code, err := tds.ReadAccountCode(codeHash)
-	if err != nil {
-		return 0, err
-	}
-	return len(code), nil
+	return codeSize, nil
 }
 
 var prevMemStats runtime.MemStats
