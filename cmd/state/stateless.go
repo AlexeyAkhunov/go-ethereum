@@ -31,9 +31,9 @@ func stateless() {
 		interruptCh <- true
 	}()
 
-	//ethDb, err := ethdb.NewLDBDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
+	ethDb, err := ethdb.NewLDBDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
 	//ethDb, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
-	ethDb, err := ethdb.NewLDBDatabase("/home/akhounov/.ethereum/geth/chaindata1")
+	//ethDb, err := ethdb.NewLDBDatabase("/home/akhounov/.ethereum/geth/chaindata1")
 	check(err)
 	defer ethDb.Close()
 	chainConfig := params.MainnetChainConfig
@@ -83,7 +83,7 @@ func stateless() {
 		}
 		check(err)
 		header := block.Header()
-		if blockNum >= 2378500 {
+		if blockNum >= 0 {
 			contracts, cMasks, cHashes, cShortKeys, cValues, codes, masks, hashes, shortKeys, values := bc.GetTrieDbState().ExtractProofs(trace)
 			dbstate, err := state.NewStateless(preRoot,
 				contracts, cMasks, cHashes, cShortKeys, cValues,
@@ -148,7 +148,7 @@ func stateless() {
 		preRoot = header.Root
 		blockNum++
 		if blockNum == 2416461 {
-			break
+			//break
 		}
 		if /*blockNum > 843000 || */(blockNum % 1000 == 0) {
 			fmt.Printf("Processed %d blocks\n", blockNum)

@@ -157,13 +157,20 @@ func (n *fullNode) duoCopy() *duoNode {
 
 func (n *duoNode) hashesExcept(idx byte) []common.Hash {
 	i1, i2 := n.childrenIdx()
+	var hash1, hash2 common.Hash
+	if n.child1 != nil {
+		hash1 = common.BytesToHash(n.child1.hash())
+	}
+	if n.child2 != nil {
+		hash2 = common.BytesToHash(n.child2.hash())
+	}
 	switch idx {
 	case i1:
-		return []common.Hash{common.BytesToHash(n.child2.hash())}
+		return []common.Hash{hash2}
 	case i2:
-		return []common.Hash{common.BytesToHash(n.child1.hash())}
+		return []common.Hash{hash1}
 	default:
-		return []common.Hash{common.BytesToHash(n.child1.hash()), common.BytesToHash(n.child2.hash())}
+		return []common.Hash{hash1, hash2}
 	}
 }
 
