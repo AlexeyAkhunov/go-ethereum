@@ -113,7 +113,10 @@ func stateless() {
 			if err != nil {
 				panic(fmt.Errorf("Finalize of block %d failed: %v", blockNum, err))
 			}
-			statedb.Finalise(chainConfig.IsEIP158(header.Number), dbstate)
+			err = statedb.Commit(chainConfig.IsEIP158(header.Number), dbstate)
+			if err != nil {
+				panic(fmt.Errorf("Commiting block %d failed: %v", blockNum, err))
+			}
 			err = dbstate.CheckRoot(header.Root)
 			if err != nil {
 				filename := fmt.Sprintf("right_%d.txt", blockNum)
