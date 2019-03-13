@@ -38,7 +38,7 @@ func stateless() {
 	defer ethDb.Close()
 	chainConfig := params.MainnetChainConfig
 	//slFile, err := os.OpenFile("/Volumes/tb4/turbo-geth/stateless.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
-	slFile, err := os.OpenFile("stateless1.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	slFile, err := os.OpenFile("stateless2.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	check(err)
 	defer slFile.Close()
 	w := bufio.NewWriter(slFile)
@@ -59,7 +59,7 @@ func stateless() {
 	preRoot = genesisBlock.Header().Root
 	//check(err)
 	bc.SetNoHistory(true)
-	bc.SetResolveReads(true)
+	bc.SetResolveReads(false)
 	blockNum := uint64(1)
 	interrupt := false
 	for !interrupt {
@@ -67,7 +67,7 @@ func stateless() {
 		if block == nil {
 			break
 		}
-		trace := false//blockNum == 843551
+		trace := blockNum == 3943607
 		if trace {
 			filename := fmt.Sprintf("right_%d.txt", blockNum-1)
 			f, err1 := os.Create(filename)
@@ -77,13 +77,18 @@ func stateless() {
 				//bc.GetTrieDbState().PrintStorageTrie(f, common.BytesToHash(common.FromHex("0x1570aaebc55e1a8067cc4a5c3ba451d196bf91544f183168b51bb1d306bda995")))
 			}
 		}
+		if blockNum >= 3943607 {
+			bc.SetResolveReads(true)
+		} else {
+			bc.SetResolveReads(false)
+		}
 		_, err = bc.InsertChain(types.Blocks{block})
 		if err != nil {
 			panic(fmt.Sprintf("Failed on block %d, error: %v\n", blockNum, err))
 		}
 		check(err)
 		header := block.Header()
-		if blockNum >= 0 {
+		if blockNum >= 3943607 {
 			contracts, cMasks, cHashes, cShortKeys, cValues, codes, masks, hashes, shortKeys, values := bc.GetTrieDbState().ExtractProofs(trace)
 			dbstate, err := state.NewStateless(preRoot,
 				contracts, cMasks, cHashes, cShortKeys, cValues,
@@ -92,61 +97,62 @@ func stateless() {
 				block.NumberU64()-1, trace,
 			)
 			if err != nil {
-				fmt.Printf("Error making state for block %d: %v\n", err)
-			}
-			statedb := state.New(dbstate)
-			gp := new(core.GasPool).AddGas(block.GasLimit())
-			usedGas := new(uint64)
-			var receipts types.Receipts
-			if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
-				misc.ApplyDAOHardFork(statedb)
-			}
-			for _, tx := range block.Transactions() {
-				receipt, _, err := core.ApplyTransaction(chainConfig, bc, nil, gp, statedb, dbstate, header, tx, usedGas, vmConfig)
+				fmt.Printf("Error making state for block %d: %v\n", blockNum, err)
+			} else {
+				statedb := state.New(dbstate)
+				gp := new(core.GasPool).AddGas(block.GasLimit())
+				usedGas := new(uint64)
+				var receipts types.Receipts
+				if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
+					misc.ApplyDAOHardFork(statedb)
+				}
+				for _, tx := range block.Transactions() {
+					receipt, _, err := core.ApplyTransaction(chainConfig, bc, nil, gp, statedb, dbstate, header, tx, usedGas, vmConfig)
+					if err != nil {
+						panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
+					}
+					receipts = append(receipts, receipt)
+				}
+				// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
+				_, err = engine.Finalize(bcb, header, statedb, block.Transactions(), block.Uncles(), receipts)
 				if err != nil {
-					panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
+					panic(fmt.Errorf("Finalize of block %d failed: %v", blockNum, err))
 				}
-				receipts = append(receipts, receipt)
-			}
-			// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-			_, err = engine.Finalize(bcb, header, statedb, block.Transactions(), block.Uncles(), receipts)
-			if err != nil {
-				panic(fmt.Errorf("Finalize of block %d failed: %v", blockNum, err))
-			}
-			err = statedb.Commit(chainConfig.IsEIP158(header.Number), dbstate)
-			if err != nil {
-				panic(fmt.Errorf("Commiting block %d failed: %v", blockNum, err))
-			}
-			err = dbstate.CheckRoot(header.Root)
-			if err != nil {
-				filename := fmt.Sprintf("right_%d.txt", blockNum)
-				f, err1 := os.Create(filename)
-				if err1 == nil {
-					defer f.Close()
-					bc.GetTrieDbState().PrintTrie(f)
+				err = statedb.Commit(chainConfig.IsEIP158(header.Number), dbstate)
+				if err != nil {
+					panic(fmt.Errorf("Commiting block %d failed: %v", blockNum, err))
 				}
-				fmt.Printf("Error processing block %d: %v\n", blockNum, err)
+				err = dbstate.CheckRoot(header.Root)
+				if err != nil {
+					filename := fmt.Sprintf("right_%d.txt", blockNum)
+					f, err1 := os.Create(filename)
+					if err1 == nil {
+						defer f.Close()
+						bc.GetTrieDbState().PrintTrie(f)
+					}
+					fmt.Printf("Error processing block %d: %v\n", blockNum, err)
+				}
+				var totalCShorts, totalCValues, totalCodes, totalShorts, totalValues int
+				for _, short := range cShortKeys {
+					totalCShorts += len(short)
+				}
+				for _, value := range cValues {
+					totalCValues += len(value)
+				}
+				for _, code := range codes {
+					totalCodes += len(code)
+				}
+				for _, short := range shortKeys {
+					totalShorts += len(short)
+				}
+				for _, value := range values {
+					totalValues += len(value)
+				}
+				fmt.Fprintf(w, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
+					blockNum, len(contracts), len(cMasks), len(cHashes), len(cShortKeys), len(cValues), len(codes),
+					len(masks), len(hashes), len(shortKeys), len(values), totalCShorts, totalValues, totalCodes, totalShorts, totalValues,
+				)
 			}
-			var totalCShorts, totalCValues, totalCodes, totalShorts, totalValues int
-			for _, short := range cShortKeys {
-				totalCShorts += len(short)
-			}
-			for _, value := range cValues {
-				totalCValues += len(value)
-			}
-			for _, code := range codes {
-				totalCodes += len(code)
-			}
-			for _, short := range shortKeys {
-				totalShorts += len(short)
-			}
-			for _, value := range values {
-				totalValues += len(value)
-			}
-			fmt.Fprintf(w, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
-				blockNum, len(contracts), len(cMasks), len(cHashes), len(cShortKeys), len(cValues), len(codes),
-				len(masks), len(hashes), len(shortKeys), len(values), totalCShorts, totalValues, totalCodes, totalShorts, totalValues,
-			)
 		}
 		preRoot = header.Root
 		blockNum++
