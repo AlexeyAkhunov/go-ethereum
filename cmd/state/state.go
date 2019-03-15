@@ -523,6 +523,7 @@ func blockMillions() []chart.GridLine {
 		{Value: 4.0},
 		{Value: 5.0},
 		{Value: 6.0},
+		{Value: 7.0},
 	}
 }
 
@@ -1732,5 +1733,10 @@ func main() {
 	//nakedSloadChart()
 	//nakedAccountChart()
 	//specExecChart1()
-	stateless()
+	//stateless()
+	stateless_chart_key_values([]int{13,14}, "key_vals_28m.png", 2800000)
+	stateless_chart_key_values([]int{10,11}, "c_key_vals_28m.png", 2800000)
+	stateless_chart_key_values([]int{6, 7}, "mask_hash_28m.png", 2800000)
+	stateless_chart_key_values([]int{1, 2}, "c_mask_hash_28m.png", 2800000)
+	stateless_chart_key_values([]int{12}, "codes_28m.png", 2800000)
 }

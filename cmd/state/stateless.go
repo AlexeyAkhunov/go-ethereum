@@ -1,12 +1,18 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"bufio"
 	"time"
 	"syscall"
 	"os/signal"
+	"encoding/csv"
+
+	"github.com/wcharczuk/go-chart"
+	"github.com/wcharczuk/go-chart/drawing"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
@@ -18,6 +24,14 @@ import (
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/params"
 )
+
+var chartColors = []drawing.Color{
+	chart.ColorBlue,
+	chart.ColorGreen,
+	chart.ColorRed,
+	chart.ColorYellow,
+	chart.ColorOrange,
+}
 
 func stateless() {
 	//state.MaxTrieCacheGen = 100000
@@ -150,7 +164,7 @@ func stateless() {
 				}
 				fmt.Fprintf(w, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
 					blockNum, len(contracts), len(cMasks), len(cHashes), len(cShortKeys), len(cValues), len(codes),
-					len(masks), len(hashes), len(shortKeys), len(values), totalCShorts, totalValues, totalCodes, totalShorts, totalValues,
+					len(masks), len(hashes), len(shortKeys), len(values), totalCShorts, totalCValues, totalCodes, totalShorts, totalValues,
 				)
 			}
 		}
@@ -172,5 +186,151 @@ func stateless() {
 	fmt.Printf("Processed %d blocks\n", blockNum)
 	fmt.Printf("Next time specify -block %d\n", blockNum)
 	fmt.Printf("Stateless client analysis took %s\n", time.Since(startTime))
+}
 
+func stateless_chart_key_values(right []int, chartFileName string, start int) {
+	file, err := os.Open("stateless1.csv")
+	check(err)
+	defer file.Close()
+	reader := csv.NewReader(bufio.NewReader(file))
+	var blocks []float64
+	var vals [15][]float64
+	count := 0
+	for records, _ := reader.Read(); records != nil; records, _ = reader.Read() {
+		count++
+		if count < start {
+			continue
+		}
+		blocks = append(blocks, parseFloat64(records[0])/1000000.0)
+		for i := 0; i < 15; i++ {
+			switch i {
+			case 11:
+				vals[i] = append(vals[i], 32.0*parseFloat64(records[4]))
+			case 1,6:
+				vals[i] = append(vals[i], 4.0*parseFloat64(records[i+1]))
+			case 2,7:
+				vals[i] = append(vals[i], 32.0*parseFloat64(records[i+1]))
+			default:
+				vals[i] = append(vals[i], parseFloat64(records[i+1]))
+			}
+		}
+	}
+	var windowSums [15] float64
+	var window int = 1024
+	var movingAvgs [15][]float64
+	for i := 0; i < 15; i++ {
+		movingAvgs[i] = make([]float64, len(blocks)-(window-1))
+	}
+	for j := 0; j < len(blocks); j++ {
+		for i := 0; i < 15; i++ {
+			windowSums[i] += vals[i][j]
+		}
+		if j >= window {
+			for i := 0; i < 15; i++ {
+				windowSums[i] -= vals[i][j-window]
+			}
+		}
+		if j >= window-1 {
+			for i := 0; i < 15; i++ {
+				movingAvgs[i][j-window+1] = windowSums[i]/float64(window)
+			}
+		}
+	}
+	movingBlock := blocks[window-1:]
+	seriesNames := [15]string{
+		"Number of contracts",
+		"Contract masks",
+		"Contract hashes",
+		"Number of contract leaf keys",
+		"Number of contract leaf vals",
+		"Number of contract codes",
+		"Masks",
+		"Hashes",
+		"Number of leaf keys",
+		"Number of leaf values",
+		"Total size of contract leaf keys",
+		"Total size of contract leaf vals",
+		"Total size of codes",
+		"Total size of leaf keys",
+		"Total size of leaf vals",
+	}
+	var currentColor int
+	var series []chart.Series
+	for _, r := range right {
+		s := &chart.ContinuousSeries{
+			Name: seriesNames[r],
+			Style: chart.Style{
+				Show:        true,
+				StrokeColor: chartColors[currentColor],
+				//FillColor:   chartColors[currentColor].WithAlpha(100),
+			},
+			XValues: movingBlock,
+			YValues: movingAvgs[r],
+		}
+		currentColor++
+		series = append(series, s)
+	}
+
+	graph1 := chart.Chart{
+		Width:  1280,
+		Height: 720,
+		Background: chart.Style{
+			Padding: chart.Box{
+				Top: 50,
+			},
+		},
+		YAxis: chart.YAxis{
+			Name:      "kBytes",
+			NameStyle: chart.StyleShow(),
+			Style:     chart.StyleShow(),
+			TickStyle: chart.Style{
+				TextRotationDegrees: 45.0,
+			},
+			ValueFormatter: func(v interface{}) string {
+				return fmt.Sprintf("%d kB", int(v.(float64)/1024.0))
+			},
+			GridMajorStyle: chart.Style{
+				Show:        true,
+				StrokeColor: chart.ColorBlack,
+				StrokeWidth: 1.0,
+			},
+			//GridLines: days(),
+		},
+		/*
+		YAxisSecondary: chart.YAxis{
+			NameStyle: chart.StyleShow(),
+			Style: chart.StyleShow(),
+			TickStyle: chart.Style{
+				TextRotationDegrees: 45.0,
+			},
+			ValueFormatter: func(v interface{}) string {
+				return fmt.Sprintf("%d", int(v.(float64)))
+			},
+		},
+		*/
+		XAxis: chart.XAxis{
+			Name: "Blocks, million",
+			Style: chart.Style{
+				Show: true,
+			},
+			ValueFormatter: func(v interface{}) string {
+				return fmt.Sprintf("%.3fm", v.(float64))
+			},
+			GridMajorStyle: chart.Style{
+				Show:        true,
+				StrokeColor: chart.ColorAlternateGray,
+				StrokeWidth: 1.0,
+			},
+			//GridLines: blockMillions(),
+		},
+		Series: series,
+	}
+
+	graph1.Elements = []chart.Renderable{chart.LegendThin(&graph1)}
+
+	buffer := bytes.NewBuffer([]byte{})
+	err = graph1.Render(chart.PNG, buffer)
+	check(err)
+	err = ioutil.WriteFile(chartFileName, buffer.Bytes(), 0644)
+    check(err)
 }
