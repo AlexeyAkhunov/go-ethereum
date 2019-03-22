@@ -697,7 +697,9 @@ func (tds *TrieDbState) trieRoot(forward bool) (common.Hash, error) {
 		fmt.Printf("Resolved in %d iterations\n", it)
 	}
 	hash := tds.t.Hash()
-	tds.t.SaveHashes(tds.db, tds.blockNr)
+	if !tds.resolveReads {
+		tds.t.SaveHashes(tds.db, tds.blockNr)
+	}
 	return hash, nil
 }
 
@@ -1468,6 +1470,7 @@ func (tsw *TrieStateWriter) WriteAccountStorage(address common.Address, key, ori
 }
 
 func (dsw *DbStateWriter) WriteAccountStorage(address common.Address, key, original, value *common.Hash) error {
+	//fmt.Printf("WriteAccountStorage address %x, key %x, original %x, value %x\n", address, *key, *original, *value)
 	if *original == *value {
 		return nil
 	}

@@ -1359,7 +1359,7 @@ func repair() {
 	}()
 
 	//historyDb, err := ethdb.NewLDBDatabase("/home/akhounov/.ethereum/geth/chaindata")
-	historyDb, err := ethdb.NewLDBDatabase("/Volumes/tb4/turbo-geth/geth/chaindata")
+	historyDb, err := ethdb.NewLDBDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
 	//historyDb, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	//historyDb, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/testnet/geth/chaindata")
 	//historyDb, err := ethdb.NewLDBDatabase("/Volumes/tb4/turbo-geth/ropsten/geth/chaindata")
@@ -1417,7 +1417,7 @@ func repair() {
 			dbstate.PruneTries()
 		}
 		blockNum++
-		if blockNum % 1000 == 0 {
+		if blockNum % 100000 == 0 {
 			fmt.Printf("Processed %d blocks\n", blockNum)
 		}
 		// Check for interrupts
@@ -1540,8 +1540,8 @@ func main() {
  	//printBranches(uint64(*block))
  	//execToBlock(*block)
  	//extractTrie(*block)
- 	fmt.Printf("%x\n", crypto.Keccak256(common.FromHex("0xD3e32594CeDbC102D739142aA70D21f4caEa5618")))
- 	//repair()
+ 	//fmt.Printf("%x\n", crypto.Keccak256(common.FromHex("0xD3e32594CeDbC102D739142aA70D21f4caEa5618")))
+ 	repair()
  	//readAccount()
  	//repairCurrent()
  	//testMemBolt()

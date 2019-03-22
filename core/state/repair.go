@@ -126,9 +126,9 @@ func (rds *RepairDbState) CheckKeys() {
 		suffixkey := make([]byte, len(suffix) + len(AccountsHistoryBucket))
 		copy(suffixkey, suffix)
 		copy(suffixkey[len(suffix):], AccountsHistoryBucket)
-		if err := rds.historyDb.Put(ethdb.SuffixBucket, suffixkey, dv); err != nil {
-			panic(err)
-		}
+		//if err := rds.historyDb.Put(ethdb.SuffixBucket, suffixkey, dv); err != nil {
+		//	panic(err)
+		//}
 	}
 	sSet := make(map[string]struct{})
 	{
@@ -173,9 +173,9 @@ func (rds *RepairDbState) CheckKeys() {
 		suffixkey := make([]byte, len(suffix) + len(StorageHistoryBucket))
 		copy(suffixkey, suffix)
 		copy(suffixkey[len(suffix):], StorageHistoryBucket)
-		if err := rds.historyDb.Put(ethdb.SuffixBucket, suffixkey, dv); err != nil {
-			panic(err)
-		}
+		//if err := rds.historyDb.Put(ethdb.SuffixBucket, suffixkey, dv); err != nil {
+		//	panic(err)
+		//}
 	}
 }
 
@@ -318,7 +318,8 @@ func (rds *RepairDbState) UpdateAccountData(address common.Address, original, ac
 	v, _ := rds.historyDb.GetS(AccountsHistoryBucket, addrHash[:], rds.blockNr)
 	if !bytes.Equal(v, originalData) {
 		fmt.Printf("REPAIR (UpdateAccountData): At block %d, address: %x, expected %x, found %x\n", rds.blockNr, address, originalData, v)
-		return rds.historyDb.PutS(AccountsHistoryBucket, addrHash[:], originalData, rds.blockNr)
+		//return rds.historyDb.PutS(AccountsHistoryBucket, addrHash[:], originalData, rds.blockNr)
+		return nil
 	}
 	return nil
 }
@@ -351,7 +352,8 @@ func (rds *RepairDbState) DeleteAccount(address common.Address, original *Accoun
 	v, _ := rds.historyDb.GetS(AccountsHistoryBucket, addrHash[:], rds.blockNr)
 	if !bytes.Equal(v, originalData) {
 		fmt.Printf("REPAIR (DeleteAccount): At block %d, address: %x, expected %x, found %x\n", rds.blockNr, address, originalData, v)
-		return rds.historyDb.PutS(AccountsHistoryBucket, addrHash[:], originalData, rds.blockNr)
+		//return rds.historyDb.PutS(AccountsHistoryBucket, addrHash[:], originalData, rds.blockNr)
+		return nil
 	}
 	return nil
 }
@@ -372,8 +374,9 @@ func (rds *RepairDbState) WriteAccountStorage(address common.Address, key, origi
 		val, _ := rds.historyDb.GetS(StorageHistoryBucket, compositeKey, rds.blockNr)
 		if val != nil {
 			fmt.Printf("REPAIR (WriteAccountStorage): At block %d, address: %x, key %x, expected nil, found %x\n", rds.blockNr, address, key, val)
-			suffix := encodeTimestamp(rds.blockNr)
-			return rds.historyDb.Delete(StorageHistoryBucket, append(compositeKey, suffix...))			
+			//suffix := encodeTimestamp(rds.blockNr)
+			//return rds.historyDb.Delete(StorageHistoryBucket, append(compositeKey, suffix...))
+			return nil		
 		}
 		return nil
 	}
@@ -408,7 +411,8 @@ func (rds *RepairDbState) WriteAccountStorage(address common.Address, key, origi
 	val, _ := rds.historyDb.GetS(StorageHistoryBucket, compositeKey, rds.blockNr)
 	if !bytes.Equal(val, oo) {
 		fmt.Printf("REPAIR (WriteAccountStorage): At block %d, address: %x, key %x, expected %x, found %x\n", rds.blockNr, address, key, oo, val)
-		return rds.historyDb.PutS(StorageHistoryBucket, compositeKey, oo, rds.blockNr)
+		//return rds.historyDb.PutS(StorageHistoryBucket, compositeKey, oo, rds.blockNr)
+		return nil
 	}
 	return nil
 }

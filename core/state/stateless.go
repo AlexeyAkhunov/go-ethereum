@@ -104,7 +104,7 @@ func NewStateless(stateRoot common.Hash,
 				defer f.Close()
 				st.Print(f)
 			}
-			return nil, fmt.Errorf("Expected storage root: %x, constructed root: %x", account.Root, st.Hash())
+			return nil, fmt.Errorf("Expected storage root for %x: %x, constructed root: %x", contract, account.Root, st.Hash())
 		}
 		maskIdx += mIdx
 		shortIdx += sIdx
