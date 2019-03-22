@@ -47,7 +47,7 @@ func construct_snapshot(ethDb ethdb.Database, stateDb ethdb.Database, db *bolt.D
 				return false, err
 			}
 			count++
-			if count % 100000 == 0 {
+			if count % 1000 == 0 {
 				if err := tx.Commit(); err != nil {
 					return false, err
 				}
@@ -109,7 +109,7 @@ func construct_snapshot(ethDb ethdb.Database, stateDb ethdb.Database, db *bolt.D
 				return false, err
 			}
 			count++
-			if count % 100000 == 0 {
+			if count % 1000 == 0 {
 				if err := tx.Commit(); err != nil {
 					return false, err
 				}
