@@ -45,9 +45,9 @@ func stateless() {
 		interruptCh <- true
 	}()
 
-	ethDb, err := ethdb.NewLDBDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
+	//ethDb, err := ethdb.NewLDBDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
 	//ethDb, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
-	//ethDb, err := ethdb.NewLDBDatabase("/home/akhounov/.ethereum/geth/chaindata1")
+	ethDb, err := ethdb.NewLDBDatabase("/home/akhounov/.ethereum/geth/chaindata1")
 	check(err)
 	defer ethDb.Close()
 	chainConfig := params.MainnetChainConfig
@@ -87,7 +87,7 @@ func stateless() {
 	tds.SetNoHistory(true)
 	interrupt := false
 	for !interrupt {
-		trace := blockNum == 3943608
+		trace := false //blockNum == 3943608
 		if trace {
 			filename := fmt.Sprintf("right_%d.txt", blockNum-1)
 			f, err1 := os.Create(filename)
