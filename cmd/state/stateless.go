@@ -93,7 +93,8 @@ func stateless() {
 			f, err1 := os.Create(filename)
 			if err1 == nil {
 				defer f.Close()
-				tds.PrintTrie(f)
+				//tds.PrintTrie(f)
+				tds.PrintStorageTrie(f, common.HexToHash("0x5ee88384a4d6a50ca315ab1afe8fe53b42606ac45b85f21c319cee616f097f57"))
 			}
 		}
 		block := bcb.GetBlockByNumber(blockNum)

@@ -125,11 +125,22 @@ func (n *fullNode) hashesExcept(idx byte) []common.Hash {
 	hashes := []common.Hash{}
 	for i, child := range n.Children {
 		if child != nil && i != int(idx) {
-			hashes = append(hashes, common.BytesToHash(child.hash()))
+			if common.BytesToHash(child.hash()) == (common.Hash{}) {
+				var s common.Hash
+				if b, err := rlp.EncodeToBytes(child); err != nil {
+					panic(err)
+				} else {
+					copy(s[:], b)
+				}
+				hashes = append(hashes, s)
+			} else {
+				hashes = append(hashes, common.BytesToHash(child.hash()))
+			}
 		}
 	}
 	return hashes
 }
+
 
 func (n *fullNode) duoCopy() *duoNode {
 	c := duoNode{}
@@ -159,10 +170,26 @@ func (n *duoNode) hashesExcept(idx byte) []common.Hash {
 	i1, i2 := n.childrenIdx()
 	var hash1, hash2 common.Hash
 	if n.child1 != nil {
-		hash1 = common.BytesToHash(n.child1.hash())
+		if common.BytesToHash(n.child1.hash()) == (common.Hash{}) {
+			if b, err := rlp.EncodeToBytes(n.child1); err != nil {
+				panic(err)
+			} else {
+				copy(hash1[:], b)
+			}
+		} else {
+			hash1 = common.BytesToHash(n.child1.hash())
+		}
 	}
 	if n.child2 != nil {
-		hash2 = common.BytesToHash(n.child2.hash())
+		if common.BytesToHash(n.child2.hash()) == (common.Hash{}) {
+			if b, err := rlp.EncodeToBytes(n.child2); err != nil {
+				panic(err)
+			} else {
+				copy(hash2[:], b)
+			}
+		} else {
+			hash2 = common.BytesToHash(n.child2.hash())
+		}
 	}
 	switch idx {
 	case i1:

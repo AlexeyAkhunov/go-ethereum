@@ -31,6 +31,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/rlp"
 )
 
 var (
@@ -112,6 +113,23 @@ func New(root common.Hash, bucket []byte, prefix []byte, encodeToBytes bool) *Tr
 	return trie
 }
 
+func decodeEmbedded(b []byte) node {
+	kbuf, rest, err := rlp.SplitString(b)
+	if err != nil {
+		return nil
+	}
+	key := compactToHex(kbuf)
+	if hasTerm(key) {
+		// value node
+		val, rest, err := rlp.SplitString(rest)
+		if err != nil || len(rest) > 0 {
+			return nil
+		}
+		return &shortNode{Key: kbuf, Val: append(valueNode{}, val...)}
+	}
+	return nil
+}
+
 func construct(pos int,
 	masks []uint32,
 	shortKeys [][]byte,
@@ -167,7 +185,46 @@ func construct(pos int,
 				if trace {
 					fmt.Printf(" %x", hashes[*hashIdx][:2])
 				}
-				f.Children[nibble] = hashNode(common.CopyBytes(hashes[*hashIdx][:]))
+				// See if this is an embedded short
+				if hashes[*hashIdx][31] == byte(0) {
+					h := hashes[*hashIdx][:]
+					var s *shortNode
+					if h[0] >= 193 && h[0] <= 222 {
+						l := int(h[0])-192
+						allZeros := true
+						for i := l+1; i < 31; i++ {
+							if h[i] != byte(0) {
+								allZeros = false
+								break
+							}
+						}
+						if allZeros && h[1] >= 129 && h[1] < 184 {
+							klen := int(h[1])-128
+							if klen <= l-2 {
+								vstart := klen+2
+								if h[vstart] < 128 {
+									if vstart == l {
+										// Value is 1 byte
+										s = &shortNode{Key: common.CopyBytes(h[2:vstart]), Val: valueNode([]byte{h[vstart]})}
+									}
+								} else if h[vstart] >= 129 && h[vstart] < 184 {
+									vlen := int(h[vstart])-128
+									if l == klen+vlen+2 {
+										s = &shortNode{Key: common.CopyBytes(h[2:vstart]), Val: valueNode(common.CopyBytes(h[vstart+1:vstart+1+vlen]))}	
+									}
+								}
+							}
+						}
+					}
+					if s == nil {
+						f.Children[nibble] = hashNode(common.CopyBytes(hashes[*hashIdx][:]))
+					} else {
+						s.flags.dirty = true
+						f.Children[nibble] = s
+					}
+				} else {
+					f.Children[nibble] = hashNode(common.CopyBytes(hashes[*hashIdx][:]))
+				}
 				(*hashIdx)++
 			} else {
 				f.Children[nibble] = nil
