@@ -121,24 +121,24 @@ func (n *fullNode) mask() uint32 {
 	return m
 }
 
-func (n *fullNode) hashesExcept(idx byte) []common.Hash {
+func (n *fullNode) hashesExcept(idx byte) (uint32, []common.Hash, map[byte]*shortNode) {
 	hashes := []common.Hash{}
+	var mask uint32
+	var m map[byte]*shortNode
 	for i, child := range n.Children {
 		if child != nil && i != int(idx) {
-			if common.BytesToHash(child.hash()) == (common.Hash{}) {
-				var s common.Hash
-				if b, err := rlp.EncodeToBytes(child); err != nil {
-					panic(err)
-				} else {
-					copy(s[:], b)
+			if s, ok := child.(*shortNode); ok && common.BytesToHash(child.hash()) == (common.Hash{}) {
+				if m == nil {
+					m = make(map[byte]*shortNode)
 				}
-				hashes = append(hashes, s)
+				m[byte(i)] = s
 			} else {
+				mask |= (uint32(1)<<uint(i))
 				hashes = append(hashes, common.BytesToHash(child.hash()))
 			}
 		}
 	}
-	return hashes
+	return mask, hashes, m
 }
 
 
@@ -166,38 +166,62 @@ func (n *fullNode) duoCopy() *duoNode {
 	return &c
 }
 
-func (n *duoNode) hashesExcept(idx byte) []common.Hash {
+func (n *duoNode) hashesExcept(idx byte) (uint32, []common.Hash, map[byte]*shortNode) {
 	i1, i2 := n.childrenIdx()
 	var hash1, hash2 common.Hash
+	var short1, short2 *shortNode
 	if n.child1 != nil {
-		if common.BytesToHash(n.child1.hash()) == (common.Hash{}) {
-			if b, err := rlp.EncodeToBytes(n.child1); err != nil {
-				panic(err)
-			} else {
-				copy(hash1[:], b)
-			}
+		if s, ok := n.child1.(*shortNode); ok && common.BytesToHash(n.child1.hash()) == (common.Hash{}) {
+			short1 = s
 		} else {
 			hash1 = common.BytesToHash(n.child1.hash())
 		}
 	}
 	if n.child2 != nil {
-		if common.BytesToHash(n.child2.hash()) == (common.Hash{}) {
-			if b, err := rlp.EncodeToBytes(n.child2); err != nil {
-				panic(err)
-			} else {
-				copy(hash2[:], b)
-			}
+		if s, ok := n.child2.(*shortNode); ok && common.BytesToHash(n.child2.hash()) == (common.Hash{}) {
+			short2 = s
 		} else {
 			hash2 = common.BytesToHash(n.child2.hash())
 		}
 	}
 	switch idx {
 	case i1:
-		return []common.Hash{hash2}
+		if short2 == nil {
+			return uint32(1)<<i2, []common.Hash{hash2}, nil
+		} else {
+			m := make(map[byte]*shortNode)
+			m[i2] = short2
+			return 0, []common.Hash{}, m
+		}
 	case i2:
-		return []common.Hash{hash1}
+		if short1 == nil {
+			return uint32(1)<<i1, []common.Hash{hash1}, nil
+		} else {
+			m := make(map[byte]*shortNode)
+			m[i1] = short1
+			return 0, []common.Hash{}, m
+		}
 	default:
-		return []common.Hash{hash1, hash2}
+		if short1 == nil {
+			if short2 == nil {
+				return (uint32(1)<<i1)|(uint32(1)<<i2), []common.Hash{hash1, hash2}, nil
+			} else {
+				m := make(map[byte]*shortNode)
+				m[i2] = short2
+				return (uint32(1)<<i1), []common.Hash{hash1}, m
+			}
+		} else {
+			if short2 == nil {
+				m := make(map[byte]*shortNode)
+				m[i1] = short1
+				return (uint32(1)<<i2), []common.Hash{hash2}, m
+			} else {
+				m := make(map[byte]*shortNode)
+				m[i1] = short1
+				m[i2] = short2
+				return 0, []common.Hash{}, m
+			}
+		}
 	}
 }
 
