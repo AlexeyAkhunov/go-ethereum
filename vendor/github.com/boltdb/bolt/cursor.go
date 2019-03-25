@@ -18,6 +18,7 @@ import (
 type Cursor struct {
 	bucket *Bucket
 	stack  []elemRef
+	idx uint64
 }
 
 // Bucket returns the bucket that this cursor was created from.
@@ -33,6 +34,7 @@ func (c *Cursor) First() (key []byte, value []byte) {
 	c.stack = c.stack[:0]
 	p, n := c.bucket.pageNode(c.bucket.root)
 	c.stack = append(c.stack, elemRef{page: p, node: n, index: 0})
+	c.idx = 0
 	c.first()
 
 	// If we land on an empty page then move to the next value.
@@ -167,21 +169,21 @@ func (c *Cursor) Delete() error {
 
 // seek moves the cursor to a given key and returns it.
 // If the key does not exist then the next key is used.
-func (c *Cursor) seek(seek []byte) (key []byte, value []byte, flags uint32) {
+func (c *Cursor) seek(seek []byte) (key []byte, value []byte, idx uint64, flags uint32) {
 	_assert(c.bucket.tx.db != nil, "tx closed")
 
 	// Start from root page/node and traverse to correct page.
 	c.stack = c.stack[:0]
-	c.search(seek, c.bucket.root)
+	idx := c.search(seek, c.bucket.root)
 	ref := &c.stack[len(c.stack)-1]
 
 	// If the cursor is pointing to the end of page/node then return nil.
 	if ref.index >= ref.count() {
-		return nil, nil, 0
+		return nil, nil, 0, 0
 	}
 
 	// If this is a bucket then return a nil value.
-	return c.keyValue()
+	return c.keyValue(), idx
 }
 
 // seekTo moves the cursor from the current position to a given key and return it
@@ -212,7 +214,11 @@ func (c *Cursor) seekTo(seek []byte) (key []byte, value[]byte, flags uint32) {
 			if elem.isLeaf() {
 				lastkey = append(p.keyPrefix(), p.leafPageElement(p.count-1).key()...)
 			} else {
-				lastkey = append(p.keyPrefix(), p.branchPageElement(p.count-1).key()...)
+				if c.bucket.enum {
+					lastkey = append(p.keyPrefix(), p.branchPageElementX(p.count-1).key()...)
+				} else {
+					lastkey = append(p.keyPrefix(), p.branchPageElement(p.count-1).key()...)
+				}
 			}
 		}
 		if bytes.Compare(seek, lastkey) <= 0 {
@@ -256,7 +262,11 @@ func (c *Cursor) first() {
 		if ref.node != nil {
 			pgid = ref.node.inodes[ref.index].pgid
 		} else {
-			pgid = ref.page.branchPageElement(uint16(ref.index)).pgid
+			if c.bucket.enum {
+				pgid = ref.page.branchPageElementX(uint16(ref.index)).pgid
+			} else {
+				pgid = ref.page.branchPageElement(uint16(ref.index)).pgid
+			}
 		}
 		p, n := c.bucket.pageNode(pgid)
 		c.stack = append(c.stack, elemRef{page: p, node: n, index: 0})
@@ -277,7 +287,11 @@ func (c *Cursor) last() {
 		if ref.node != nil {
 			pgid = ref.node.inodes[ref.index].pgid
 		} else {
-			pgid = ref.page.branchPageElement(uint16(ref.index)).pgid
+			if c.bucket.enum {
+				pgid = ref.page.branchPageElementX(uint16(ref.index)).pgid
+			} else {
+				pgid = ref.page.branchPageElement(uint16(ref.index)).pgid
+			}
 		}
 		p, n := c.bucket.pageNode(pgid)
 
@@ -380,7 +394,13 @@ func (c *Cursor) searchNode(key []byte, n *node) {
 
 func (c *Cursor) searchPage(key []byte, p *page) {
 	// Binary search for the correct range.
-	inodes := p.branchPageElements()
+	var inodes []branchPageElement
+	var inodesX []branchPageElementX
+	if c.bucket.enum {
+		inodesX = p.branchPageElementsX()
+	} else {
+		inodes = p.branchPageElements()
+	}
 	pagePrefix := p.keyPrefix()
 	keyPrefix := key
 	if len(key) > len(pagePrefix) {
@@ -397,7 +417,11 @@ func (c *Cursor) searchPage(key []byte, p *page) {
 	case 0:
 		shortKey := key[len(pagePrefix):]
 		index = offset+(count-1)-sort.Search(count, func(i int) bool {
-			return bytes.Compare(inodes[offset+(count-1)-i].key(), shortKey) != 1
+			if c.bucket.enum {
+				return bytes.Compare(inodesX[offset+(count-1)-i].key(), shortKey) != 1
+			} else {
+				return bytes.Compare(inodes[offset+(count-1)-i].key(), shortKey) != 1
+			}
 		})
 	}
 	if index < offset {
@@ -406,7 +430,11 @@ func (c *Cursor) searchPage(key []byte, p *page) {
 	c.stack[len(c.stack)-1].index = index
 
 	// Recursively search to the next page.
-	c.search(key, inodes[index].pgid)
+	if c.bucket.enum {
+		c.search(key, inodesX[index].pgid)
+	} else {
+		c.search(key, inodes[index].pgid)
+	}
 }
 
 // nsearch searches the leaf node on the top of the stack for a key.
@@ -509,3 +537,14 @@ func (r *elemRef) count() int {
 	}
 	return int(r.page.count)
 }
+
+func (r *elemRef) size() uint64 {
+	if r.node != nil {
+		return r.node.inodes[r.index].size
+	}
+	if (r.page.flags & branchPageFlag) == 0 {
+		return 1
+	}
+	return r.page.
+}
+

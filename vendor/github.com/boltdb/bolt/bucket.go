@@ -47,6 +47,8 @@ type Bucket struct {
 	//
 	// This is non-persisted across transactions so it must be set in every Tx.
 	FillPercent float64
+
+	enum bool // whether the bucket needs to support enumeration of leaves
 }
 
 // bucket represents the on-file representation of a bucket.
@@ -56,6 +58,7 @@ type Bucket struct {
 type bucket struct {
 	root     pgid   // page id of the bucket's root-level page
 	sequence uint64 // monotonically incrementing, used by NextSequence()
+	enum     bool   // whether the bucket needs to support enumeration of leaves
 }
 
 // newBucket returns a new bucket associated with a transaction.
@@ -158,7 +161,7 @@ func (b *Bucket) openBucket(value []byte) *Bucket {
 // CreateBucket creates a new bucket at the given key and returns the new bucket.
 // Returns an error if the key already exists, if the bucket name is blank, or if the bucket name is too long.
 // The bucket instance is only valid for the lifetime of the transaction.
-func (b *Bucket) CreateBucket(key []byte) (*Bucket, error) {
+func (b *Bucket) CreateBucket(key []byte, enum bool) (*Bucket, error) {
 	if b.tx.db == nil {
 		return nil, ErrTxClosed
 	} else if !b.tx.writable {
@@ -181,7 +184,7 @@ func (b *Bucket) CreateBucket(key []byte) (*Bucket, error) {
 
 	// Create empty, inline bucket.
 	var bucket = Bucket{
-		bucket:      &bucket{},
+		bucket:      &bucket{enum: enum},
 		rootNode:    &node{isLeaf: true},
 		FillPercent: DefaultFillPercent,
 	}
@@ -189,7 +192,7 @@ func (b *Bucket) CreateBucket(key []byte) (*Bucket, error) {
 
 	// Insert into node.
 	key = cloneBytes(key)
-	c.node().put(key, key, value, 0, bucketLeafFlag)
+	c.node().put(key, key, value, 0, bucketLeafFlag, 0)
 
 	// Since subbuckets are not allowed on inline buckets, we need to
 	// dereference the inline page, if it exists. This will cause the bucket
@@ -202,8 +205,8 @@ func (b *Bucket) CreateBucket(key []byte) (*Bucket, error) {
 // CreateBucketIfNotExists creates a new bucket if it doesn't already exist and returns a reference to it.
 // Returns an error if the bucket name is blank, or if the bucket name is too long.
 // The bucket instance is only valid for the lifetime of the transaction.
-func (b *Bucket) CreateBucketIfNotExists(key []byte) (*Bucket, error) {
-	child, err := b.CreateBucket(key)
+func (b *Bucket) CreateBucketIfNotExists(key []byte, enum bool) (*Bucket, error) {
+	child, err := b.CreateBucket(key, enum)
 	if err == ErrBucketExists {
 		return b.Bucket(key), nil
 	} else if err != nil {
@@ -263,19 +266,19 @@ func (b *Bucket) DeleteBucket(key []byte) error {
 // Get retrieves the value for a key in the bucket.
 // Returns a nil value if the key does not exist or if the key is a nested bucket.
 // The returned value is only valid for the life of the transaction.
-func (b *Bucket) Get(key []byte) []byte {
-	k, v, flags := b.Cursor().seek(key)
+func (b *Bucket) Get(key []byte) ([]byte, uint64) {
+	k, v, idx, flags := b.Cursor().seek(key)
 
 	// Return nil if this is a bucket.
 	if (flags & bucketLeafFlag) != 0 {
-		return nil
+		return nil, 0
 	}
 
 	// If our target node isn't the same key as what's passed in then return nil.
 	if !bytes.Equal(key, k) {
-		return nil
+		return nil, 0
 	}
-	return v
+	return v, idx
 }
 
 // Put sets the value for a key in the bucket.
@@ -306,7 +309,18 @@ func (b *Bucket) Put(key []byte, value []byte) error {
 
 	// Insert into node.
 	key = cloneBytes(key)
-	c.node().put(key, key, value, 0, 0)
+	if c.node().put(key, key, value, 0, 0, 0) {
+		// Increment size on all references starting from the top
+		var n = c.stack[0].node
+		if n == nil {
+			n = c.bucket.node(c.stack[0].page.id, nil)
+		}
+		for _, ref := range c.stack[:len(c.stack)-1] {
+			_assert(!n.isLeaf, "expected branch node")
+			n.inodes[ref.index].size++
+			n = n.childAt(int(ref.index))
+		}
+	}
 
 	return nil
 }
@@ -356,7 +370,18 @@ func (b *Bucket) MultiPut(pairs ...[]byte) error {
 			c.node().del(key)
 		} else {
 			value = cloneBytes(value)
-			c.node().put(key, key, value, 0, 0)
+			if c.node().put(key, key, value, 0, 0, 0) {
+				// Increment size on all references starting from the top
+				var n = c.stack[0].node
+				if n == nil {
+					n = c.bucket.node(c.stack[0].page.id, nil)
+				}
+				for _, ref := range c.stack[:len(c.stack)-1] {
+					_assert(!n.isLeaf, "expected branch node")
+					n.inodes[ref.index].size++
+					n = n.childAt(int(ref.index))
+				}
+			}
 		}
 	}
 	return nil
@@ -431,7 +456,18 @@ func (b *Bucket) Delete(key []byte) error {
 	}
 
 	// Delete the node if we have a matching key.
-	c.node().del(key)
+	if c.node().del(key) {
+		// Decrement size on all references starting from the top
+		var n = c.stack[0].node
+		if n == nil {
+			n = c.bucket.node(c.stack[0].page.id, nil)
+		}
+		for _, ref := range c.stack[:len(c.stack)-1] {
+			_assert(!n.isLeaf, "expected branch node")
+			n.inodes[ref.index].size--
+			n = n.childAt(int(ref.index))
+		}		
+	}
 
 	return nil
 }
@@ -545,16 +581,30 @@ func (b *Bucket) Stats() BucketStats {
 			}
 		} else if (p.flags & branchPageFlag) != 0 {
 			s.BranchPageN++
-			lastElement := p.branchPageElement(p.count - 1)
+			var used int
+			if b.enum {
+				lastElement := p.branchPageElementX(p.count - 1)
 
-			// used totals the used bytes for the page
-			// Add header and all element headers.
-			used := pageHeaderSize + (branchPageElementSize * int(p.count-1))
+				// used totals the used bytes for the page
+				// Add header and all element headers.
+				used = pageHeaderSize + (branchPageElementSizeX * int(p.count-1))
 
-			// Add size of all keys and values.
-			// Again, use the fact that last element's position equals to
-			// the total of key, value sizes of all previous elements.
-			used += int(lastElement.pos + lastElement.ksize)
+				// Add size of all keys and values.
+				// Again, use the fact that last element's position equals to
+				// the total of key, value sizes of all previous elements.
+				used += int(lastElement.pos + lastElement.ksize)
+			} else {
+				lastElement := p.branchPageElement(p.count - 1)
+
+				// used totals the used bytes for the page
+				// Add header and all element headers.
+				used = pageHeaderSize + (branchPageElementSize * int(p.count-1))
+
+				// Add size of all keys and values.
+				// Again, use the fact that last element's position equals to
+				// the total of key, value sizes of all previous elements.
+				used += int(lastElement.pos + lastElement.ksize)
+			}
 			s.BranchInuse += used
 			s.BranchOverflowN += int(p.overflow)
 		}
@@ -609,8 +659,13 @@ func (b *Bucket) _forEachPageNode(pgid pgid, depth int, fn func(*page, *node, in
 	if p != nil {
 		if (p.flags & branchPageFlag) != 0 {
 			for i := 0; i < int(p.count); i++ {
-				elem := p.branchPageElement(uint16(i))
-				b._forEachPageNode(elem.pgid, depth+1, fn)
+				if b.enum {
+					elem := p.branchPageElementX(uint16(i))
+					b._forEachPageNode(elem.pgid, depth+1, fn)
+				} else {
+					elem := p.branchPageElement(uint16(i))
+					b._forEachPageNode(elem.pgid, depth+1, fn)
+				}
 			}
 		}
 	} else {
@@ -658,7 +713,7 @@ func (b *Bucket) spill() error {
 		if flags&bucketLeafFlag == 0 {
 			panic(fmt.Sprintf("unexpected bucket header flag: %x", flags))
 		}
-		c.node().put([]byte(name), []byte(name), value, 0, bucketLeafFlag)
+		c.node().put([]byte(name), []byte(name), value, 0, bucketLeafFlag, 0)
 	}
 
 	// Ignore if there's not a materialized root node.

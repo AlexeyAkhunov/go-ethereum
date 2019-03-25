@@ -120,7 +120,7 @@ func (db *LDBDatabase) Path() string {
 // Put puts the given key / value to the queue
 func (db *LDBDatabase) Put(bucket, key []byte, value []byte) error {
 	err := db.db.Update(func(tx *bolt.Tx) error {
-		b, err := tx.CreateBucketIfNotExists(bucket)
+		b, err := tx.CreateBucketIfNotExists(bucket, false)
 		if err != nil {
 			return err
 		}
@@ -150,14 +150,14 @@ func (db *LDBDatabase) PutS(hBucket, key, value []byte, timestamp uint64) error 
 	suffixkey := make([]byte, len(suffix) + len(hBucket))
 	copy(suffixkey, suffix)
 	err := db.db.Update(func(tx *bolt.Tx) error {
-		hb, err := tx.CreateBucketIfNotExists(hBucket)
+		hb, err := tx.CreateBucketIfNotExists(hBucket, false)
 		if err != nil {
 			return err
 		}
 		if err = hb.Put(composite, value); err != nil {
 			return err
 		}
-		sb, err := tx.CreateBucketIfNotExists(SuffixBucket)
+		sb, err := tx.CreateBucketIfNotExists(SuffixBucket, false)
 		if err != nil {
 			return err
 		}
@@ -185,7 +185,7 @@ func (db *LDBDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 			bucketEnd := bucketStart
 			for ; bucketEnd < len(tuples) && bytes.Equal(tuples[bucketEnd], tuples[bucketStart]); bucketEnd += 3 {
 			}
-			b, err := tx.CreateBucketIfNotExists(tuples[bucketStart])
+			b, err := tx.CreateBucketIfNotExists(tuples[bucketStart], false)
 			if err != nil {
 				return err
 			}

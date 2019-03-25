@@ -1452,7 +1452,7 @@ func repairCurrent() {
 		if err := tx.DeleteBucket(state.StorageBucket); err != nil {
 			return err
 		}
-		newB, err := tx.CreateBucket(state.StorageBucket)
+		newB, err := tx.CreateBucket(state.StorageBucket, false)
 		if err != nil {
 			return err
 		}
@@ -1476,11 +1476,11 @@ func repairCurrent() {
 }
 
 func testMemBolt() {
-	db, err := bolt.Open("membolt", 0600, &bolt.Options{MemOnly: true})
+	db, err := bolt.Open("membolt", 0600, &bolt.Options{MemOnly: false})
 	check(err)
 	defer db.Close()
 	err = db.Update(func(tx *bolt.Tx) error {
-		bucket, err := tx.CreateBucketIfNotExists([]byte("B"))
+		bucket, err := tx.CreateBucketIfNotExists([]byte("B"), true)
 		if err != nil {
 			return fmt.Errorf("Bucket creation: %v", err)
 		}
@@ -1544,6 +1544,6 @@ func main() {
  	//repair()
  	//readAccount()
  	//repairCurrent()
- 	//testMemBolt()
+ 	testMemBolt()
 }
 

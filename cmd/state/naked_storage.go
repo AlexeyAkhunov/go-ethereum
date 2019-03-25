@@ -218,7 +218,6 @@ func nakedSstoreChart() {
 			ns[i-window+1] = nakedSstoresGroup/float64(window)
 		}
 	} 
-	check(err)
 	totalSeries := &chart.ContinuousSeries{
 		Name: fmt.Sprintf("Total SSTOREs per block, moving average with window %d", window),
 		Style: chart.Style{
@@ -326,7 +325,6 @@ func nakedSloadChart() {
 			ns[i-window+1] = nakedSloadsGroup/float64(window)
 		}
 	} 
-	check(err)
 	totalSeries := &chart.ContinuousSeries{
 		Name: fmt.Sprintf("Total SLOADs per block, moving average with window %d", window),
 		Style: chart.Style{
