@@ -127,12 +127,20 @@ func (n *fullNode) hashesExcept(idx byte) (uint32, []common.Hash, map[byte]*shor
 	var m map[byte]*shortNode
 	for i, child := range n.Children {
 		if child != nil && i != int(idx) {
+			short := false
 			if s, ok := child.(*shortNode); ok && common.BytesToHash(child.hash()) == (common.Hash{}) {
-				if m == nil {
-					m = make(map[byte]*shortNode)
+				if v, isVal := s.Val.(valueNode); isVal && len(v) < 32 {
+					e, _ := rlp.EncodeToBytes(s)
+					if len(e) < 32 {
+						if m == nil {
+							m = make(map[byte]*shortNode)
+						}
+						m[byte(i)] = s
+						short = true
+					}
 				}
-				m[byte(i)] = s
-			} else {
+			}
+			if !short {
 				mask |= (uint32(1)<<uint(i))
 				hashes = append(hashes, common.BytesToHash(child.hash()))
 			}
@@ -172,15 +180,27 @@ func (n *duoNode) hashesExcept(idx byte) (uint32, []common.Hash, map[byte]*short
 	var short1, short2 *shortNode
 	if n.child1 != nil {
 		if s, ok := n.child1.(*shortNode); ok && common.BytesToHash(n.child1.hash()) == (common.Hash{}) {
-			short1 = s
-		} else {
+			if v, isVal := s.Val.(valueNode); isVal && len(v) < 32 {
+				e, _ := rlp.EncodeToBytes(s)
+				if len(e) < 32 {
+					short1 = s
+				}
+			}
+		}
+		if short1 == nil {
 			hash1 = common.BytesToHash(n.child1.hash())
 		}
 	}
 	if n.child2 != nil {
 		if s, ok := n.child2.(*shortNode); ok && common.BytesToHash(n.child2.hash()) == (common.Hash{}) {
-			short2 = s
-		} else {
+			if v, isVal := s.Val.(valueNode); isVal && len(v) < 32 {
+				e, _ := rlp.EncodeToBytes(s)
+				if len(e) < 32 {
+					short2 = s
+				}
+			}
+		}
+		if short2 == nil {
 			hash2 = common.BytesToHash(n.child2.hash())
 		}
 	}

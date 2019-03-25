@@ -958,9 +958,9 @@ func (tds *TrieDbState) addProof(prefix, key []byte, pos int, mask uint32, hashe
 		ks := string(k)
 		if m, ok := proofMasks[ks]; ok {
 			intersection := m & mask
-			if mask != 0 {
+			//if mask != 0 {
 				proofMasks[ks] = intersection
-			}
+			//}
 			h := proofHashes[ks]
 			idx := 0
 			for i := byte(0); i < 16; i++ {
@@ -975,9 +975,9 @@ func (tds *TrieDbState) addProof(prefix, key []byte, pos int, mask uint32, hashe
 			}
 			proofHashes[ks] = h
 		} else {
-			if mask != 0 {
+			//if mask != 0 {
 				proofMasks[ks] = mask
-			}
+			//}
 			var h [16]common.Hash
 			idx := 0
 			for i := byte(0); i < 16; i++ {
