@@ -52,7 +52,7 @@ func stateless() {
 	defer ethDb.Close()
 	chainConfig := params.MainnetChainConfig
 	//slFile, err := os.OpenFile("/Volumes/tb4/turbo-geth/stateless.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
-	slFile, err := os.OpenFile("stateless2.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	slFile, err := os.OpenFile("stateless3.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	check(err)
 	defer slFile.Close()
 	w := bufio.NewWriter(slFile)
