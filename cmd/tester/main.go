@@ -63,6 +63,10 @@ func main() {
 }
 
 func tester(ctx *cli.Context) error {
+	if len(ctx.Args()) < 1 {
+		fmt.Printf("Usage: tester <enode>\n")
+		return nil
+	}
 	nodeToConnect, err := enode.ParseV4(ctx.Args()[0])
 	if err != nil {
 		panic(fmt.Sprintf("Could not parse the node info: %v", err))

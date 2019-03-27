@@ -286,7 +286,8 @@ func (g *Genesis) ToBlock(db ethdb.Database) (*types.Block, *state.StateDB, *sta
 // Commit writes the block and state of a genesis specification to the database.
 // The block is committed as the canonical head block.
 func (g *Genesis) Commit(db ethdb.Database) (*types.Block, *state.StateDB, error) {
-	block, statedb, tds, err := g.ToBlock(db)
+	batch := db.NewBatch()
+	block, statedb, tds, err := g.ToBlock(batch)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -296,6 +297,9 @@ func (g *Genesis) Commit(db ethdb.Database) (*types.Block, *state.StateDB, error
 	tds.SetBlockNr(0)
 	if err := statedb.Commit(false, tds.DbStateWriter()); err != nil {
 		return nil, statedb, fmt.Errorf("cannot write state: %v", err)
+	}
+	if _, err := batch.Commit(); err != nil {
+		return nil, nil, err
 	}
 	rawdb.WriteTd(db, block.Hash(), block.NumberU64(), g.Difficulty)
 	rawdb.WriteBlock(db, block)
