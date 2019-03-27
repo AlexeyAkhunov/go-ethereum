@@ -95,8 +95,7 @@ func (tp *TesterProtocol) protocolRun (peer *p2p.Peer, rw p2p.MsgReadWriter) err
 	sentBlocks := 0
 	emptyBlocks := 0
 	signaledHead := false
-	for i := 0; i < 10000; i++ {
-		fmt.Printf("Message loop i %d\n", i)
+	for {
 		// Read the next message
 		msg, err = rw.ReadMsg()
 		if err != nil {

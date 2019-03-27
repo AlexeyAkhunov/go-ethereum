@@ -4,7 +4,9 @@ import (
     "crypto/ecdsa"
     "fmt"
     "math/big"
+    "math/rand"
     "os"
+    "encoding/binary"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
@@ -15,6 +17,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ethereum/go-ethereum/core/vm"
 )
 
 type BlockGenerator struct {
@@ -73,6 +76,15 @@ func (bg *BlockGenerator) LastBlock() *types.Block {
 	return bg.lastBlock
 }
 
+
+func randAddress(r *rand.Rand) common.Address {
+	var b common.Address
+	binary.BigEndian.PutUint64(b[:], r.Uint64())
+	binary.BigEndian.PutUint64(b[8:], r.Uint64())
+	binary.BigEndian.PutUint32(b[16:], r.Uint32())
+	return b
+}
+
 func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, error) {
 	output, err := os.OpenFile(outputFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.ModePerm)
 	if err != nil {
@@ -91,7 +103,7 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 		return nil, err
 	}
 	coinbase := crypto.PubkeyToAddress(coinbaseKey.PublicKey)
-	config := params.MainnetChainConfig
+	chainConfig := params.MainnetChainConfig
 	var pos uint64
 	td := new(big.Int)
 	bg := &BlockGenerator{
@@ -104,32 +116,71 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 	}
 	bg.headersByHash[genesisBlock.Header().Hash()] = genesisBlock.Header()
 	bg.headersByNumber[0] = genesisBlock.Header()
+	r := rand.New(rand.NewSource(4589489854))
+	var nonce uint64 // nonce of the sender (coinbase)
+	amount := big.NewInt(1) // 1 wei
+	gasPrice := big.NewInt(10000000)
+
 	for height := 1; height <= initialHeight; height++ {
 		num := parent.Number()
 		tstamp := parent.Time().Int64() + 15
+		gasLimit := core.CalcGasLimit(parent, 100000, 8000000)
 		header := &types.Header{
 			ParentHash: parent.Hash(),
 			Number:     num.Add(num, common.Big1),
-			GasLimit:   core.CalcGasLimit(parent, 0, 8000000),
+			GasLimit:   gasLimit,
 			Extra:      extra,
 			Time:       big.NewInt(tstamp),
 			Coinbase: coinbase,
-			Difficulty: ethash.CalcDifficulty(config, uint64(tstamp), parent.Header()),
+			Difficulty: ethash.CalcDifficulty(chainConfig, uint64(tstamp), parent.Header()),
 		}
 		tds.SetBlockNr(parent.NumberU64())
 		statedb := state.New(tds)
-		accumulateRewards(config, statedb, header, []*types.Header{})
-		header.Root, err = tds.IntermediateRoot(statedb, config.IsEIP158(header.Number))
+		// Add more transactions
+		signedTxs := []*types.Transaction{}
+		receipts := []*types.Receipt{}
+		if height > 1 && gasLimit >= 21000 {
+			signer := types.MakeSigner(chainConfig, big.NewInt(int64(height)))
+			gp := new(core.GasPool).AddGas(header.GasLimit)
+			usedGas := new(uint64)
+			vmConfig := vm.Config{}
+
+			to := randAddress(r)
+			tx := types.NewTransaction(nonce, to, amount, 21000, gasPrice, []byte{})
+			signed_tx, err := types.SignTx(tx, signer, coinbaseKey)
+			if err != nil {
+				return nil, err
+			} 
+			signedTxs = append(signedTxs, signed_tx)
+			receipt, _, err := core.ApplyTransaction(chainConfig, nil, &coinbase, gp, statedb, tds.TrieStateWriter(), header, signed_tx, usedGas, vmConfig)
+			if err != nil {
+				return nil, fmt.Errorf("tx %x failed: %v", signed_tx.Hash(), err)
+			}
+			if !chainConfig.IsByzantium(header.Number) {
+				rootHash, err := tds.TrieRoot()
+				if err != nil {
+					panic(fmt.Errorf("%x failed: %v", signed_tx.Hash(), err))
+				}
+				receipt.PostState = rootHash.Bytes()
+			}
+			receipts = append(receipts, receipt)
+			nonce++
+		} else {
+			fmt.Printf("Block %d: Gas limit too low for a transaction: %d\n", height, gasLimit)
+		}
+
+		accumulateRewards(chainConfig, statedb, header, []*types.Header{})
+		header.Root, err = tds.IntermediateRoot(statedb, chainConfig.IsEIP158(header.Number))
 		if err != nil {
 			return nil, err
 		}
-		err = statedb.Commit(config.IsEIP158(header.Number), tds.DbStateWriter())
+		err = statedb.Commit(chainConfig.IsEIP158(header.Number), tds.DbStateWriter())
 		if err != nil {
 			return nil, err
 		}
 		// Generate an empty block
-		block := types.NewBlock(header, []*types.Transaction{}, []*types.Header{}, []*types.Receipt{})
-		fmt.Printf("block hash for %d: %x\n", block.NumberU64(), block.Hash())
+		block := types.NewBlock(header, signedTxs, []*types.Header{}, receipts)
+		//fmt.Printf("block hash for %d: %x\n", block.NumberU64(), block.Hash())
 		if buffer, err := rlp.EncodeToBytes(block); err != nil {
 			return nil, err
 		} else {

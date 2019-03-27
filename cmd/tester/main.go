@@ -5,7 +5,9 @@ import (
 	"os"
 	"runtime"
 	"sort"
-	"time"
+
+	"syscall"
+	"os/signal"
 
 	"github.com/ethereum/go-ethereum/cmd/utils"
 	"github.com/ethereum/go-ethereum/console"
@@ -79,7 +81,7 @@ func tester(ctx *cli.Context) error {
 	//fmt.Printf("%s %s\n", ctx.Args()[0], ctx.Args()[1])
 	tp := NewTesterProtocol()
 	//tp.blockFeeder, err = NewBlockAccessor(ctx.Args()[0]/*, ctx.Args()[1]*/)
-	blockGen, err := NewBlockGenerator("emptyblocks", 1000)
+	blockGen, err := NewBlockGenerator("emptyblocks", 50000)
 	defer blockGen.Close()
 	if err != nil {
 		panic(fmt.Sprintf("Failed to create block generator: %v", err))
@@ -113,6 +115,16 @@ func tester(ctx *cli.Context) error {
 		panic(fmt.Sprintf("Could not start server: %v", err))
 	}
 	server.AddPeer(nodeToConnect)
-	time.Sleep(1*time.Minute)
+
+	sigs := make(chan os.Signal, 1)
+	interruptCh := make(chan bool, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		<-sigs
+		interruptCh <- true
+	}()
+
+	_ = <-interruptCh
 	return nil
 }

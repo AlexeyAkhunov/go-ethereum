@@ -87,14 +87,14 @@ func stateless() {
 	tds.SetNoHistory(true)
 	interrupt := false
 	for !interrupt {
-		trace := false //blockNum == 3943608
+		trace := blockNum == 5022856
 		if trace {
 			filename := fmt.Sprintf("right_%d.txt", blockNum-1)
 			f, err1 := os.Create(filename)
 			if err1 == nil {
 				defer f.Close()
 				//tds.PrintTrie(f)
-				tds.PrintStorageTrie(f, common.HexToHash("5ee88384a4d6a50ca315ab1afe8fe53b42606ac45b85f21c319cee616f097f57"))
+				tds.PrintStorageTrie(f, common.HexToHash("1a4fa162e70315921486693f1d5943b7704232081b39206774caa567d63f633f"))
 			}
 		}
 		block := bcb.GetBlockByNumber(blockNum)
