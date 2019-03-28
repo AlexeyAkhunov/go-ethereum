@@ -412,7 +412,7 @@ func state_snapshot() {
 		receipts = append(receipts, receipt)
 	}
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-	_, err = engine.Finalize(bc, nextHeader, statedb, nextBlock.Transactions(), nextBlock.Uncles(), receipts)
+	_, err = engine.Finalize(chainConfig, nextHeader, statedb, nextBlock.Transactions(), nextBlock.Uncles(), receipts)
 	if err != nil {
 		panic(fmt.Errorf("Finalize of block %d failed: %v", blockNum+1, err))
 	}

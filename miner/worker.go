@@ -964,7 +964,7 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 	}
 	s := w.current.state.Copy()
 	tds := w.current.tds.Copy()
-	block, err := w.engine.Finalize(w.chain, w.current.header, s, w.current.txs, uncles, w.current.receipts)
+	block, err := w.engine.Finalize(w.config, w.current.header, s, w.current.txs, uncles, w.current.receipts)
 	if err != nil {
 		return err
 	}

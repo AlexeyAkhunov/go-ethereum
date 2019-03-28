@@ -205,7 +205,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 		}
 		if b.engine != nil {
 			// Finalize and seal the block
-			_, err := b.engine.Finalize(chainreader, b.header, statedb, b.txs, b.uncles, b.receipts)
+			_, err := b.engine.Finalize(config, b.header, statedb, b.txs, b.uncles, b.receipts)
 			if err != nil {
 				panic(fmt.Sprintf("could not finalize block: %v", err))
 			}

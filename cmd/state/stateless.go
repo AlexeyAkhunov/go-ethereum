@@ -26,11 +26,12 @@ import (
 )
 
 var chartColors = []drawing.Color{
-	chart.ColorBlue,
-	chart.ColorGreen,
+	chart.ColorBlack,
 	chart.ColorRed,
+	chart.ColorBlue,
 	chart.ColorYellow,
 	chart.ColorOrange,
+	chart.ColorGreen,
 }
 
 func stateless() {
@@ -98,7 +99,6 @@ func stateless() {
 			}
 		}
 		block := bcb.GetBlockByNumber(blockNum)
-		tds.SetResolveReads(blockNum >= 4900000)
 		statedb := state.New(tds)
 		gp := new(core.GasPool).AddGas(block.GasLimit())
 		usedGas := new(uint64)
@@ -123,7 +123,7 @@ func stateless() {
 			receipts = append(receipts, receipt)
 		}
 		// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-		_, err = engine.Finalize(bcb, header, statedb, block.Transactions(), block.Uncles(), receipts)
+		_, err = engine.Finalize(chainConfig, header, statedb, block.Transactions(), block.Uncles(), receipts)
 		if err != nil {
 			panic(fmt.Errorf("Finalize of block %d failed: %v", blockNum, err))
 		}
@@ -142,74 +142,72 @@ func stateless() {
 		if _, err := batch.Commit(); err != nil {
 			panic(err)
 		}
-		if blockNum >= 4900000 {
-			contracts, cMasks, cHashes, cShortKeys, cValues, codes, masks, hashes, shortKeys, values := tds.ExtractProofs(trace)
-			dbstate, err := state.NewStateless(preRoot,
-				contracts, cMasks, cHashes, cShortKeys, cValues,
-				codes,
-				masks, hashes, shortKeys, values,
-				block.NumberU64()-1, trace,
-			)
-			if err != nil {
-				fmt.Printf("Error making state for block %d: %v\n", blockNum, err)
-			} else {
-				statedb := state.New(dbstate)
-				gp := new(core.GasPool).AddGas(block.GasLimit())
-				usedGas := new(uint64)
-				var receipts types.Receipts
-				if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
-					misc.ApplyDAOHardFork(statedb)
-				}
-				for _, tx := range block.Transactions() {
-					receipt, _, err := core.ApplyTransaction(chainConfig, bcb, nil, gp, statedb, dbstate, header, tx, usedGas, vmConfig)
-					if err != nil {
-						panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
-					}
-					receipts = append(receipts, receipt)
-				}
-				// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-				_, err = engine.Finalize(bcb, header, statedb, block.Transactions(), block.Uncles(), receipts)
-				if err != nil {
-					panic(fmt.Errorf("Finalize of block %d failed: %v", blockNum, err))
-				}
-				dbstate.SetBlockNr(blockNum+1)
-				err = statedb.Commit(chainConfig.IsEIP158(header.Number), dbstate)
-				if err != nil {
-					panic(fmt.Errorf("Commiting block %d failed: %v", blockNum, err))
-				}
-				err = dbstate.CheckRoot(header.Root)
-				if err != nil {
-					filename := fmt.Sprintf("right_%d.txt", blockNum)
-					f, err1 := os.Create(filename)
-					if err1 == nil {
-						defer f.Close()
-						tds.PrintTrie(f)
-					}
-					fmt.Printf("Error processing block %d: %v\n", blockNum, err)
-				}
-				var totalCShorts, totalCValues, totalCodes, totalShorts, totalValues int
-				for _, short := range cShortKeys {
-					totalCShorts += len(short)
-				}
-				for _, value := range cValues {
-					totalCValues += len(value)
-				}
-				for _, code := range codes {
-					totalCodes += len(code)
-				}
-				for _, short := range shortKeys {
-					totalShorts += len(short)
-				}
-				for _, value := range values {
-					totalValues += len(value)
-				}
-				fmt.Fprintf(w, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
-					blockNum, len(contracts), len(cMasks), len(cHashes), len(cShortKeys), len(cValues), len(codes),
-					len(masks), len(hashes), len(shortKeys), len(values), totalCShorts, totalCValues, totalCodes, totalShorts, totalValues,
-				)
+		contracts, cMasks, cHashes, cShortKeys, cValues, codes, masks, hashes, shortKeys, values := tds.ExtractProofs(trace)
+		dbstate, err := state.NewStateless(preRoot,
+			contracts, cMasks, cHashes, cShortKeys, cValues,
+			codes,
+			masks, hashes, shortKeys, values,
+			block.NumberU64()-1, trace,
+		)
+		if err != nil {
+			fmt.Printf("Error making state for block %d: %v\n", blockNum, err)
+		} else {
+			statedb := state.New(dbstate)
+			gp := new(core.GasPool).AddGas(block.GasLimit())
+			usedGas := new(uint64)
+			var receipts types.Receipts
+			if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
+				misc.ApplyDAOHardFork(statedb)
 			}
-			tds.PruneTries()
+			for _, tx := range block.Transactions() {
+				receipt, _, err := core.ApplyTransaction(chainConfig, bcb, nil, gp, statedb, dbstate, header, tx, usedGas, vmConfig)
+				if err != nil {
+					panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
+				}
+				receipts = append(receipts, receipt)
+			}
+			// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
+			_, err = engine.Finalize(chainConfig, header, statedb, block.Transactions(), block.Uncles(), receipts)
+			if err != nil {
+				panic(fmt.Errorf("Finalize of block %d failed: %v", blockNum, err))
+			}
+			dbstate.SetBlockNr(blockNum+1)
+			err = statedb.Commit(chainConfig.IsEIP158(header.Number), dbstate)
+			if err != nil {
+				panic(fmt.Errorf("Commiting block %d failed: %v", blockNum, err))
+			}
+			err = dbstate.CheckRoot(header.Root)
+			if err != nil {
+				filename := fmt.Sprintf("right_%d.txt", blockNum)
+				f, err1 := os.Create(filename)
+				if err1 == nil {
+					defer f.Close()
+					tds.PrintTrie(f)
+				}
+				fmt.Printf("Error processing block %d: %v\n", blockNum, err)
+			}
+			var totalCShorts, totalCValues, totalCodes, totalShorts, totalValues int
+			for _, short := range cShortKeys {
+				totalCShorts += len(short)
+			}
+			for _, value := range cValues {
+				totalCValues += len(value)
+			}
+			for _, code := range codes {
+				totalCodes += len(code)
+			}
+			for _, short := range shortKeys {
+				totalShorts += len(short)
+			}
+			for _, value := range values {
+				totalValues += len(value)
+			}
+			fmt.Fprintf(w, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
+				blockNum, len(contracts), len(cMasks), len(cHashes), len(cShortKeys), len(cValues), len(codes),
+				len(masks), len(hashes), len(shortKeys), len(values), totalCShorts, totalCValues, totalCodes, totalShorts, totalValues,
+			)
 		}
+		tds.PruneTries()
 		preRoot = header.Root
 		blockNum++
 		if blockNum == 2416461 {
@@ -230,13 +228,13 @@ func stateless() {
 	fmt.Printf("Stateless client analysis took %s\n", time.Since(startTime))
 }
 
-func stateless_chart_key_values(right []int, chartFileName string, start int) {
-	file, err := os.Open("stateless1.csv")
+func stateless_chart_key_values(right []int, chartFileName string, start int, startColor int) {
+	file, err := os.Open("stateless2.csv")
 	check(err)
 	defer file.Close()
 	reader := csv.NewReader(bufio.NewReader(file))
 	var blocks []float64
-	var vals [15][]float64
+	var vals [18][]float64
 	count := 0
 	for records, _ := reader.Read(); records != nil; records, _ = reader.Read() {
 		count++
@@ -244,42 +242,48 @@ func stateless_chart_key_values(right []int, chartFileName string, start int) {
 			continue
 		}
 		blocks = append(blocks, parseFloat64(records[0])/1000000.0)
-		for i := 0; i < 15; i++ {
+		for i := 0; i < 18; i++ {
+			cProofs := 4.0*parseFloat64(records[2]) + 32.0*parseFloat64(records[3]) + parseFloat64(records[11]) + parseFloat64(records[12])
+			proofs := 4.0*parseFloat64(records[7]) + 32.0*parseFloat64(records[8]) + parseFloat64(records[14]) + parseFloat64(records[15])
 			switch i {
-			case 11:
-				vals[i] = append(vals[i], 32.0*parseFloat64(records[4]))
 			case 1,6:
 				vals[i] = append(vals[i], 4.0*parseFloat64(records[i+1]))
 			case 2,7:
 				vals[i] = append(vals[i], 32.0*parseFloat64(records[i+1]))
+			case 15:
+				vals[i] = append(vals[i], cProofs)
+			case 16:
+				vals[i] = append(vals[i], proofs)
+			case 17:
+				vals[i] = append(vals[i], cProofs + proofs + parseFloat64(records[13]))
 			default:
 				vals[i] = append(vals[i], parseFloat64(records[i+1]))
 			}
 		}
 	}
-	var windowSums [15] float64
+	var windowSums [18] float64
 	var window int = 1024
-	var movingAvgs [15][]float64
-	for i := 0; i < 15; i++ {
+	var movingAvgs [18][]float64
+	for i := 0; i < 18; i++ {
 		movingAvgs[i] = make([]float64, len(blocks)-(window-1))
 	}
 	for j := 0; j < len(blocks); j++ {
-		for i := 0; i < 15; i++ {
+		for i := 0; i < 18; i++ {
 			windowSums[i] += vals[i][j]
 		}
 		if j >= window {
-			for i := 0; i < 15; i++ {
+			for i := 0; i < 18; i++ {
 				windowSums[i] -= vals[i][j-window]
 			}
 		}
 		if j >= window-1 {
-			for i := 0; i < 15; i++ {
+			for i := 0; i < 18; i++ {
 				movingAvgs[i][j-window+1] = windowSums[i]/float64(window)
 			}
 		}
 	}
 	movingBlock := blocks[window-1:]
-	seriesNames := [15]string{
+	seriesNames := [18]string{
 		"Number of contracts",
 		"Contract masks",
 		"Contract hashes",
@@ -295,8 +299,11 @@ func stateless_chart_key_values(right []int, chartFileName string, start int) {
 		"Total size of codes",
 		"Total size of leaf keys",
 		"Total size of leaf vals",
+		"Block proofs (contracts only)",
+		"Block proofs (without contracts)",
+		"Block proofs (total)",
 	}
-	var currentColor int
+	var currentColor int = startColor
 	var series []chart.Series
 	for _, r := range right {
 		s := &chart.ContinuousSeries{

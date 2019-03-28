@@ -120,6 +120,7 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 	var nonce uint64 // nonce of the sender (coinbase)
 	amount := big.NewInt(1) // 1 wei
 	gasPrice := big.NewInt(10000000)
+	engine := ethash.NewFullFaker()
 
 	for height := 1; height <= initialHeight; height++ {
 		num := parent.Number()
@@ -169,11 +170,15 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 			fmt.Printf("Block %d: Gas limit too low for a transaction: %d\n", height, gasLimit)
 		}
 
-		accumulateRewards(chainConfig, statedb, header, []*types.Header{})
+		if _, err := engine.Finalize(chainConfig, header, statedb, signedTxs, []*types.Header{}, receipts); err != nil {
+			return nil, err
+		}
+
 		header.Root, err = tds.IntermediateRoot(statedb, chainConfig.IsEIP158(header.Number))
 		if err != nil {
 			return nil, err
 		}
+		tds.SetBlockNr(uint64(height))
 		err = statedb.Commit(chainConfig.IsEIP158(header.Number), tds.DbStateWriter())
 		if err != nil {
 			return nil, err
