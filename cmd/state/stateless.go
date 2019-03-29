@@ -35,7 +35,7 @@ var chartColors = []drawing.Color{
 }
 
 func stateless() {
-	//state.MaxTrieCacheGen = 100000
+	state.MaxTrieCacheGen = 64*1024*1024
 	startTime := time.Now()
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
