@@ -210,13 +210,13 @@ func stateless() {
 				)
 			}
 		}
-		tds.PruneTries()
 		preRoot = header.Root
 		blockNum++
 		if blockNum == 2416461 {
 			//break
 		}
 		if /*blockNum > 843000 || */(blockNum % 1000 == 0) {
+			tds.PruneTries()
 			fmt.Printf("Processed %d blocks\n", blockNum)
 		}
 		// Check for interrupts
