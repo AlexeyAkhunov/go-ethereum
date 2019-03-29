@@ -205,8 +205,13 @@ func (tds *TrieDbState) SetHistorical(h bool) {
 }
 
 func (tds *TrieDbState) SetResolveReads(rr bool) {
-	tds.resolveReads = rr
-	tds.t.SetResolveReads(rr)
+	if tds.resolveReads != rr {
+		tds.resolveReads = rr
+		tds.t.SetResolveReads(rr)
+		for _, st := range tds.storageTries {
+			st.SetResolveReads(rr)
+		}
+	}
 }
 
 func (tds *TrieDbState) SetNoHistory(nh bool) {

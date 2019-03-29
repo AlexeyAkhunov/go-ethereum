@@ -12,6 +12,10 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/state"
+
+	"github.com/llgcode/draw2d/draw2dimg"
+	"image"
+	"image/color"
 )
 
 func randKeyHash(r *rand.Rand) common.Hash {
@@ -22,7 +26,7 @@ func randKeyHash(r *rand.Rand) common.Hash {
 	return b
 }
 
-func estimateContractSize(db *bolt.DB, contract common.Address, probes int, probeWidth int) (int, int, error) {
+func actualContractSize(db *bolt.DB, contract common.Address) (int, error) {
 	var fk [52]byte
 	copy(fk[:], contract[:])
 	actual := 0
@@ -34,11 +38,14 @@ func estimateContractSize(db *bolt.DB, contract common.Address, probes int, prob
 		}
 		return nil
 	}); err != nil {
-		return 0, 0, err
+		return 0, err
 	}
-	if actual == 0 {
-		return 0, 0, nil
-	}
+	return actual, nil
+}
+
+func estimateContractSize(db *bolt.DB, contract common.Address, probes int, probeWidth int) (int, error) {
+	var fk [52]byte
+	copy(fk[:], contract[:])
 	r := rand.New(rand.NewSource(4589489854))
 	var seekkey [52]byte
 	copy(seekkey[:], contract[:])
@@ -49,12 +56,10 @@ func estimateContractSize(db *bolt.DB, contract common.Address, probes int, prob
 	}
 	largeInt := big.NewInt(0)
 	largeInt = largeInt.SetBytes(large[:])
-	fmt.Printf("Large int: %d\n", largeInt)
 	if err := db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(state.StorageBucket)
 		for i := 0; i < probes; i++ {
 			probeKeyHash := randKeyHash(r)
-			fmt.Printf("Random keyhash: %x\n", probeKeyHash)
 			c := b.Cursor()
 			copy(seekkey[20:], probeKeyHash[:])
 			first := big.NewInt(0)
@@ -67,7 +72,6 @@ func estimateContractSize(db *bolt.DB, contract common.Address, probes int, prob
 						panic("")
 					}
 				}
-				fmt.Printf("probe %d key %d: %x\n", i, j, k[20:])
 				if j == 0 {
 					first = first.SetBytes(k[20:])
 				}
@@ -83,20 +87,16 @@ func estimateContractSize(db *bolt.DB, contract common.Address, probes int, prob
 				diff = diff.Sub(first, last)
 				diff = diff.Sub(largeInt, diff)
 			}
-			fmt.Printf("Diff: %d\n", diff)
 			total = total.Add(total, diff)
 		}
 		return nil
 	}); err != nil {
-		return 0, 0, err
+		return 0, err
 	}
-	fmt.Printf("Total: %d\n", total)
 	estimatedInt := big.NewInt(0).Mul(largeInt, big.NewInt(int64(probes)))
 	estimatedInt = estimatedInt.Mul(estimatedInt, big.NewInt(int64(probeWidth)))
 	estimatedInt = estimatedInt.Div(estimatedInt, total)
-	fmt.Printf("Estimation: %d\n", estimatedInt)
-	estimated := 0
-	return actual, estimated, nil
+	return int(estimatedInt.Int64()), nil
 }
 
 func estimate() {
@@ -104,8 +104,35 @@ func estimate() {
 	db, err := bolt.Open("/Volumes/tb4/turbo-geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
 	check(err)
 	defer db.Close()
-	actual, estimated, err := estimateContractSize(db, common.HexToAddress("0x2a0c0dbecc7e4d658f48e01e3fa353f44050c208"), 100, 20)
+	actual, err := actualContractSize(db, common.HexToAddress("0x2a0c0dbecc7e4d658f48e01e3fa353f44050c208"))
 	check(err)
-	fmt.Printf("Size of IDEX_1 is %d, estimated %d\n", actual, estimated)
+	fmt.Printf("Size of IDEX_1 is %d\n", actual)
+	for i := 1; i < 20; i++ {
+		for j := 1; j < 20; j++ {
+			estimated, err := estimateContractSize(db, common.HexToAddress("0x2a0c0dbecc7e4d658f48e01e3fa353f44050c208"), i, j)
+			check(err)
+			e := (float64(actual)-float64(estimated))/float64(actual)
+			fmt.Printf("probes: %d, width: %d, estimated: %d, error: %f%%\n", i, j, estimated, e*100.0)
+		}
+	}
 	fmt.Printf("Estimation took %s\n", time.Since(startTime))
+	// Initialize the graphic context on an RGBA image
+	dest := image.NewRGBA(image.Rect(0, 0, 297, 210.0))
+	gc := draw2dimg.NewGraphicContext(dest)
+
+	// Set some properties
+	gc.SetFillColor(color.RGBA{0x44, 0xff, 0x44, 0xff})
+	gc.SetStrokeColor(color.RGBA{0x44, 0x44, 0x44, 0xff})
+	gc.SetLineWidth(5)
+
+	// Draw a closed shape
+	gc.BeginPath() // Initialize a new path
+	gc.MoveTo(10, 10) // Move to a position to start the new path
+	gc.LineTo(100, 50)
+	gc.QuadCurveTo(100, 10, 10, 10)
+	gc.Close()
+	gc.FillStroke()
+
+	// Save to file
+	draw2dimg.SaveToPngFile("hello.png", dest)
 }
