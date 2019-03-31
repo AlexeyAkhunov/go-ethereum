@@ -87,8 +87,9 @@ func stateless() {
 	tds.SetResolveReads(true)
 	tds.SetNoHistory(true)
 	interrupt := false
+	var thresholdBlock uint64 = 5000000
 	for !interrupt {
-		trace := blockNum == 5022856
+		trace := false//blockNum == 5022856
 		if trace {
 			filename := fmt.Sprintf("right_%d.txt", blockNum-1)
 			f, err1 := os.Create(filename)
@@ -98,7 +99,7 @@ func stateless() {
 				tds.PrintStorageTrie(f, common.HexToHash("1a4fa162e70315921486693f1d5943b7704232081b39206774caa567d63f633f"))
 			}
 		}
-		tds.SetResolveReads(blockNum >= 5000000)
+		tds.SetResolveReads(blockNum >= thresholdBlock)
 		block := bcb.GetBlockByNumber(blockNum)
 		statedb := state.New(tds)
 		gp := new(core.GasPool).AddGas(block.GasLimit())
@@ -143,7 +144,7 @@ func stateless() {
 		if _, err := batch.Commit(); err != nil {
 			panic(err)
 		}
-		if blockNum >= 5000000 {
+		if blockNum >= thresholdBlock {
 			contracts, cMasks, cHashes, cShortKeys, cValues, codes, masks, hashes, shortKeys, values := tds.ExtractProofs(trace)
 			dbstate, err := state.NewStateless(preRoot,
 				contracts, cMasks, cHashes, cShortKeys, cValues,
