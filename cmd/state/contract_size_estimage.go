@@ -2,31 +2,43 @@ package main
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
 	"time"
 	"math"
 	"math/big"
-	"math/rand"
 
 	"github.com/boltdb/bolt"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/state"
+	"github.com/ethereum/go-ethereum/crypto"
 
 	"github.com/llgcode/draw2d"
 	"github.com/llgcode/draw2d/draw2dimg"
 	"image"
 	"image/color"
-	"sort"
+	//"sort"
 )
 
-func randKeyHash(r *rand.Rand) common.Hash {
-	var b common.Hash
-	for i := 0; i < 32; i+=8 {
-		binary.BigEndian.PutUint64(b[i:], r.Uint64())
-	}
-	return b
+func storageRoot(db *bolt.DB, contract common.Address) (common.Hash, error) {
+	var storageRoot common.Hash
+	err := db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(state.AccountsBucket)
+		if b == nil {
+			return fmt.Errorf("Could not find accounts bucket")
+		}
+		enc := b.Get(crypto.Keccak256(contract[:]))
+		if enc == nil {
+			return fmt.Errorf("Could find account %x\n", contract)
+		}
+		account, err := encodingToAccount(enc)
+		if err != nil {
+			return err
+		}
+		storageRoot = account.Root
+		return nil
+	})
+	return storageRoot, err
 }
 
 func actualContractSize(db *bolt.DB, contract common.Address) (int, error) {
@@ -46,25 +58,32 @@ func actualContractSize(db *bolt.DB, contract common.Address) (int, error) {
 	return actual, nil
 }
 
-func estimateContractSize(db *bolt.DB, contract common.Address, probes int, probeWidth int) (int, error) {
+func estimateContractSize(seed common.Hash, db *bolt.DB, contract common.Address, probes int, probeWidth int) (int, error) {
 	var fk [52]byte
 	copy(fk[:], contract[:])
-	r := rand.New(rand.NewSource(4589489854))
 	var seekkey [52]byte
 	copy(seekkey[:], contract[:])
 	total := big.NewInt(0)
-	var large [32]byte
-	for i := 0; i < 32; i++ {
-		large[i] = 0xff
-	}
+	var large [33]byte
+	large[0] = 1
 	largeInt := big.NewInt(0)
 	largeInt = largeInt.SetBytes(large[:])
+	step := big.NewInt(0)
+	step = step.SetBytes(large[:])
+	step = step.Div(step, big.NewInt(int64(probes)))
+	probeKeyHash := crypto.Keccak256(seed[:])
+	probe := big.NewInt(0)
+	probe.SetBytes(probeKeyHash)
 	if err := db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(state.StorageBucket)
 		for i := 0; i < probes; i++ {
-			probeKeyHash := randKeyHash(r)
+			//probeKeyHash := crypto.Keccak256(seed[:])
+			//copy(seed[:], probeKeyHash)
 			c := b.Cursor()
-			copy(seekkey[20:], probeKeyHash[:])
+			for c := 20; c < 20+32-len(probeKeyHash); c++ {
+				seekkey[c] = 0
+			}
+			copy(seekkey[20+32-len(probeKeyHash):], probeKeyHash)
 			first := big.NewInt(0)
 			last := big.NewInt(0)
 			k, _ := c.Seek(seekkey[:])
@@ -91,6 +110,9 @@ func estimateContractSize(db *bolt.DB, contract common.Address, probes int, prob
 				diff = diff.Sub(largeInt, diff)
 			}
 			total = total.Add(total, diff)
+			probe = probe.Add(probe, step)
+			probe = probe.Mod(probe, largeInt)
+			probeKeyHash = probe.Bytes()
 		}
 		return nil
 	}); err != nil {
@@ -140,14 +162,16 @@ func estimate() {
 	db, err := bolt.Open("/Volumes/tb4/turbo-geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
 	check(err)
 	defer db.Close()
-	//addr := common.HexToAddress("0x8d12a197cb00d4747a1fe03395095ce2a5cc6819")
-	addr := common.HexToAddress("0x06012c8cf97bead5deae237070f9587f8e7a266d")
+	addr := common.HexToAddress("0x8d12a197cb00d4747a1fe03395095ce2a5cc6819")
+	//addr := common.HexToAddress("0x06012c8cf97bead5deae237070f9587f8e7a266d")
+	//addr := common.HexToAddress("0x2a0c0dbecc7e4d658f48e01e3fa353f44050c208")
+	seed, err := storageRoot(db, addr)
+	check(err)
 	actual, err := actualContractSize(db, addr)
-	//actual, err := actualContractSize(db, common.HexToAddress("0x2a0c0dbecc7e4d658f48e01e3fa353f44050c208"))
 	check(err)
 	fmt.Printf("Size of IDEX_1 is %d\n", actual)
 	maxi := 30
-	maxj := 20
+	maxj := 40
 	// Initialize the graphic context on an RGBA image
 	imageWidth := 1280
 	imageHeight := 720
@@ -181,7 +205,7 @@ func estimate() {
 	for i := 1; i < maxi; i++ {
 		vals[i] = make([]float64, maxj)
 		for j := 1; j < maxj; j++ {
-			estimated, err := estimateContractSize(db, addr, i, j)
+			estimated, err := estimateContractSize(seed, db, addr, i, j)
 			check(err)
 			e := (float64(actual)-float64(estimated))/float64(actual)
 			vals[i][j] = e
@@ -194,18 +218,25 @@ func estimate() {
 			es = append(es, math.Abs(e))
 		}
 	}
-	sort.Float64s(es)
-	median := es[len(es)/2]
-	fmt.Printf("Median: %f\n", median)
+	if maxe > 1.0 {
+		maxe = 1.0
+	}
+	//sort.Float64s(es)
+	//median := es[len(es)/2]
+	//fmt.Printf("Median: %f\n", median)
 	for i := 1; i < maxi; i++ {
 		for j := 1; j < maxj; j++ {
 			e := vals[i][j]
 			heat := math.Abs(e)
-			if heat < median {
-				heat = 0.5*(heat - mine)/(median-mine)
-			} else {
-				heat = 0.5 + 0.5*(heat - median)/(maxe-median)
+			if heat > 1.0 {
+				heat = 1.0
 			}
+			heat = (heat-mine)/(maxe-mine)
+			//if heat < median {
+			//	heat = 0.5*(heat - mine)/(median-mine)
+			//} else {
+			//	heat = 0.5 + 0.5*(heat - median)/(maxe-median)
+			//}
 			red, green, blue := getHeatMapColor(heat)
 			txt := fmt.Sprintf("%.1f%%", e*100.0)
 			fi := float64(i)

@@ -334,6 +334,9 @@ func calcIndex(key []byte, pos int) uint32 {
 
 // Touching the node removes it from the nodeList
 func (t *Trie) touch(db ethdb.Database, n node, key []byte, pos int) {
+	if t.resolveReads {
+		return
+	}
 	if n == nil {
 		return
 	}

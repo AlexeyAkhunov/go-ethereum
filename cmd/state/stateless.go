@@ -217,7 +217,7 @@ func stateless() {
 			//break
 		}
 		if /*blockNum > 843000 || */(blockNum % 1000 == 0) {
-			tds.PruneTries()
+			tds.PruneTries(true)
 			fmt.Printf("Processed %d blocks\n", blockNum)
 		}
 		// Check for interrupts

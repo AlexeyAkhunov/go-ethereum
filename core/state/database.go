@@ -1295,7 +1295,7 @@ func (tds *TrieDbState) ReadAccountCodeSize(codeHash common.Hash) (codeSize int,
 
 var prevMemStats runtime.MemStats
 
-func (tds *TrieDbState) PruneTries() {
+func (tds *TrieDbState) PruneTries(print bool) {
 	if tds.nodeCount > int(MaxTrieCacheGen) {
 		toRemove := 0
 		excess := tds.nodeCount - int(MaxTrieCacheGen)
@@ -1319,6 +1319,9 @@ func (tds *TrieDbState) PruneTries() {
 		var m runtime.MemStats
 		runtime.ReadMemStats(&m)
 		log.Info("Memory", "nodes", tds.nodeCount, "alloc", int(m.Alloc / 1024), "sys", int(m.Sys / 1024), "numGC", int(m.NumGC))
+		if print {
+			fmt.Printf("Pruning done. Nodes: %d, alloc: %d, sys: %d, numGC: %d\n", tds.nodeCount, int(m.Alloc / 1024), int(m.Sys / 1024), int(m.NumGC))
+		}
 	}
 }
 
