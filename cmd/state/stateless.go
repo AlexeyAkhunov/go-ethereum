@@ -95,8 +95,8 @@ func stateless() {
 			f, err1 := os.Create(filename)
 			if err1 == nil {
 				defer f.Close()
-				//tds.PrintTrie(f)
-				tds.PrintStorageTrie(f, common.HexToHash("1a4fa162e70315921486693f1d5943b7704232081b39206774caa567d63f633f"))
+				tds.PrintTrie(f)
+				//tds.PrintStorageTrie(f, common.HexToHash("1a4fa162e70315921486693f1d5943b7704232081b39206774caa567d63f633f"))
 			}
 		}
 		tds.SetResolveReads(blockNum >= thresholdBlock)
@@ -213,11 +213,8 @@ func stateless() {
 		}
 		preRoot = header.Root
 		blockNum++
-		if blockNum == 2416461 {
-			//break
-		}
-		if /*blockNum > 843000 || */(blockNum % 1000 == 0) {
-			tds.PruneTries(true)
+		if blockNum % 1000 == 0 {
+			//tds.PruneTries(true)
 			fmt.Printf("Processed %d blocks\n", blockNum)
 		}
 		// Check for interrupts
