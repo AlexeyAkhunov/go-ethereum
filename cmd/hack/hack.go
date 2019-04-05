@@ -1533,7 +1533,7 @@ func main() {
  	//testRedis()
  	//upgradeBlocks()
  	//compareTries()
- 	invTree("root", "right", "diff", *block, true)
+ 	invTree("root", "right", "diff", *block, false)
  	//invTree("iw", "ir", "id", *block, true)
  	//loadAccount()
  	//preimage()
@@ -1545,5 +1545,6 @@ func main() {
  	//readAccount()
  	//repairCurrent()
  	//testMemBolt()
+ 	//fmt.Printf("\u00b3\n")
 }
 

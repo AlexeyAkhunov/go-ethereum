@@ -58,88 +58,88 @@ func actualContractSize(db *bolt.DB, contract common.Address) (int, error) {
 	return actual, nil
 }
 
-func estimateContractSize(seed common.Hash, db *bolt.DB, contract common.Address, probes int, probeWidth int) (int, error) {
+func estimateContractSize(seed common.Hash, db *bolt.DB, contract common.Address, probes int, probeWidth int, trace bool) (int, error) {
+	if trace {
+		fmt.Printf("-----------------------------\n")
+	}
 	var fk [52]byte
 	copy(fk[:], contract[:])
 	var seekkey [52]byte
 	copy(seekkey[:], contract[:])
-	total := big.NewInt(0)
 	var large [33]byte
 	large[0] = 1
 	largeInt := big.NewInt(0).SetBytes(large[:])
-	step := big.NewInt(0).Div(largeInt, big.NewInt(int64(probes)))
+	sectorSize := big.NewInt(0).Div(largeInt, big.NewInt(int64(probes)))
 	probeKeyHash := seed[:]
-	probe := big.NewInt(0).SetBytes(probeKeyHash)
-	sampleCount := 0
-	exact := 0
-	seenK := make(map[[52]byte]struct{})
+	probe := big.NewInt(0).SetBytes(seed[:])
+	samples := make(map[[32]byte]*big.Int)
 	if err := db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(state.StorageBucket)
+		c := b.Cursor()
+		var k []byte
+		var overstepped bool
 		for i := 0; i < probes; i++ {
-			c := b.Cursor()
-			for c := 20; c < 20+32-len(probeKeyHash); c++ {
-				seekkey[c] = 0
+			if trace {
+				fmt.Printf("i==%d\n", i)
 			}
-			copy(seekkey[20+32-len(probeKeyHash):], probeKeyHash)
-			prev := big.NewInt(0)
-			curr := big.NewInt(0)
-			diff := big.NewInt(0)
-			k, _ := c.Seek(seekkey[:])
+			prev := big.NewInt(0).SetBytes(probeKeyHash)
 			allSteps := big.NewInt(0)
+			if !overstepped {
+				for ci := 20; ci < 20+32-len(probeKeyHash); ci++ {
+					seekkey[ci] = 0
+				}
+				copy(seekkey[20+32-len(probeKeyHash):], probeKeyHash)
+				if trace {
+					fmt.Printf("seekkey: %x\n", seekkey[20:])
+				}
+				k, _ = c.Seek(seekkey[:])
+			}
 			for j := 0; j < probeWidth+1; j++ {
+				if trace {
+					fmt.Printf("j==%d\n", j)
+				}
 				if k == nil || !bytes.HasPrefix(k, contract[:]) {
 					k, _ = c.Seek(fk[:])
 					if k == nil || !bytes.HasPrefix(k, contract[:]) {
 						panic("")
 					}
 				}
-				var sk [52]byte
-				copy(sk[:], k)
-				//if j == 0 {
-					if _, ok := seenK[sk]; ok {
-						//fmt.Printf("Break with i == %d, j == %d\n", i, j)
-						total.Sub(total, allSteps)
-						sampleCount -= j
-						//fmt.Printf("Adding %d to exact\n", j)
-						exact += j
-						break
-					} else {
-						//fmt.Printf("Go on: %x\n", k[20:])
-					}
-				//}
-				if j > 0 {
-					curr.SetBytes(k[20:])
-					if prev.Cmp(curr) < 0 {
-						diff.Sub(curr, prev)
-					} else {
-						diff.Sub(prev, curr)
-						diff.Sub(largeInt, diff)
-					}
-					total.Add(total, diff)
-					sampleCount++
-					allSteps.Add(allSteps, diff)
-					if allSteps.Cmp(largeInt) >= 0 {
-						exact = j
-						sampleCount = 0
-						return nil
-					}
-					if allSteps.Cmp(step) >= 0 {
-						// Adjust to the step
-						total.Sub(total, allSteps)
-						sampleCount -= j
-						//fmt.Printf("Adding %d to exact\n", j)
-						exact += j
-						break
+				if trace {
+					fmt.Printf("%x\n", k[20:])
+				}
+				curr := big.NewInt(0).SetBytes(k[20:])
+				diff := big.NewInt(0)
+				if prev.Cmp(curr) < 0 {
+					diff.Sub(curr, prev)
+				} else {
+					diff.Sub(prev, curr)
+					diff.Sub(largeInt, diff)
+				}
+				allSteps.Add(allSteps, diff)
+				if !overstepped {
+					var sampleEnd [32]byte
+					copy(sampleEnd[:], k[20:])
+					if _, ok := samples[sampleEnd]; !ok || j > 0 {
+						samples[sampleEnd] = diff
 					}
 				}
-				//if j < probeWidth {
-					seenK[sk] = struct{}{}
-				//}
 				prev.SetBytes(k[20:])
-				k, _ = c.Next()
+				if j < probeWidth {
+					k, _ = c.Next()
+				}
+				overstepped = false
 			}
-			probe.Add(probe, step)
-			if probe.Cmp(largeInt) >= 0 {
+			if allSteps.Cmp(sectorSize) < 0 {
+				probe.Add(probe, sectorSize)
+				overstepped = false
+			} else {
+				if trace {
+					fmt.Printf("Move by allSteps\n")
+				}
+				probe.Add(probe, allSteps)
+				overstepped = true
+			}
+			for probe.Cmp(largeInt) >= 0 {
 				probe.Sub(probe, largeInt)
 			}
 			probeKeyHash = probe.Bytes()
@@ -148,13 +148,20 @@ func estimateContractSize(seed common.Hash, db *bolt.DB, contract common.Address
 	}); err != nil {
 		return 0, err
 	}
+	total := big.NewInt(0)
+	for _, sample := range samples {
+		total.Add(total, sample)
+	}
+	sampleCount := len(samples)
 	estimatedInt := big.NewInt(0)
 	if sampleCount > 0 {
 		estimatedInt.Mul(largeInt, big.NewInt(int64(sampleCount)))
 		estimatedInt.Div(estimatedInt, total)
 	}
-	//fmt.Printf("probes: %d, probeWidth: %d, estimate: %d, exact: %d\n", probes, probeWidth, estimatedInt, exact)
-	return int(estimatedInt.Int64()) + exact, nil
+	if trace {
+		fmt.Printf("probes: %d, probeWidth: %d, sampleCount: %d, estimate: %d\n", probes, probeWidth, sampleCount, estimatedInt)
+	}
+	return int(estimatedInt.Int64()), nil
 }
 
 func getHeatMapColor(value float64) (red, green, blue float64) {
@@ -196,10 +203,11 @@ func getHeatMapColor(value float64) (red, green, blue float64) {
   return
 }
 
-func itemsByAddress(db *bolt.DB) map[common.Address]int {
+func itemsByAddress(db *bolt.DB) (map[common.Address]int, []common.Address) {
 	// Go through the current state
 	var addr common.Address
 	itemsByAddress := make(map[common.Address]int)
+	var list []common.Address
 	deleted := make(map[common.Address]bool) // Deleted contracts
 	numDeleted := 0
 	//itemsByCreator := make(map[common.Address]int)
@@ -224,6 +232,9 @@ func itemsByAddress(db *bolt.DB) map[common.Address]int {
 			if del {
 				continue
 			}
+			if _, ok := itemsByAddress[addr]; !ok {
+				list = append(list, addr)
+			}
 			itemsByAddress[addr]++
 			count++
 			if count%100000 == 0 {
@@ -233,29 +244,37 @@ func itemsByAddress(db *bolt.DB) map[common.Address]int {
 		return nil
 	})
 	check(err)
-	return itemsByAddress
+	return itemsByAddress, list
 }
 
 func estimate() {
 	startTime := time.Now()
-	//db, err := bolt.Open("/Volumes/tb4/turbo-geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	db, err := bolt.Open("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
+	db, err := bolt.Open("/Volumes/tb4/turbo-geth-10/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
+	//db, err := bolt.Open("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
 	check(err)
 	defer db.Close()
-	contractMap := itemsByAddress(db)
+	contractMap, list := itemsByAddress(db)
 	fmt.Printf("Collected itemsByAddress: %d\n", len(contractMap))
-	maxi := 30
-	maxj := 20
+	maxi := 20
+	maxj := 50
+	trace := false
 	valMap := make(map[int][][]float64)
+	allVals := make([][]float64, maxi)
+	for i := 1; i < maxi; i++ {
+		allVals[i] = make([]float64, maxj)
+	}
+	valMap[0] = allVals
 	count := 0
-	for addr, actual := range contractMap {
+	for _, addr := range list {
+		actual := contractMap[addr]
 		if actual < 2 {
 			continue
 		}
 		category := int(math.Log2(float64(actual)))
-		if category != 1 {
-			continue
+		if category != 2 {
+			//continue
 		}
+		//fmt.Printf("%d\n", idx)
 		vals, ok := valMap[category]
 		if !ok {
 			vals = make([][]float64, maxi)
@@ -268,20 +287,30 @@ func estimate() {
 		check(err)
 		for i := 1; i < maxi; i++ {
 			for j := 1; j < maxj; j++ {
-				estimated, err := estimateContractSize(seed, db, addr, i, j)
+				estimated, err := estimateContractSize(seed, db, addr, i, j, trace)
 				check(err)
 				e := math.Abs((float64(actual)-float64(estimated))/float64(actual))
 				if e > vals[i][j] {
 					vals[i][j] = e
 				}
+				if e > allVals[i][j] {
+					allVals[i][j] = e
+				}
+				if e > 1.0 && i == 1 && j == 5 {
+					//fmt.Printf("%d\n", idx)
+				} 
 			}
 		}
 		count++
 		if count % 1000 == 0 {
 			fmt.Printf("Processed contracts: %d\n", count)
 		}
-		fmt.Printf("Actual size: %d\n", actual)
-		break
+		if trace {
+			fmt.Printf("Actual size: %d\n", actual)
+		}
+		if trace {
+			break
+		}
 	}
 	fmt.Printf("Generating images...\n")
 	for category, vals := range valMap {
@@ -304,8 +333,8 @@ func estimate() {
 			maxe = mine + 1.0
 		}
 		// Initialize the graphic context on an RGBA image
-		imageWidth := 1280
-		imageHeight := 720
+		imageWidth := 2000
+		imageHeight := 480
 		dest := image.NewRGBA(image.Rect(0, 0, imageWidth, imageHeight))
 		gc := draw2dimg.NewGraphicContext(dest)
 
@@ -313,21 +342,21 @@ func estimate() {
 		gc.SetFillColor(color.RGBA{0x44, 0xff, 0x44, 0xff})
 		gc.SetStrokeColor(color.RGBA{0x44, 0x44, 0x44, 0xff})
 		gc.SetLineWidth(1)
-		cellWidth := float64(imageWidth) / float64(maxi+1)
-		cellHeight := float64(imageHeight) / float64(maxj+1)
+		cellWidth := float64(imageWidth) / float64(maxj+1)
+		cellHeight := float64(imageHeight) / float64(maxi+1)
 		for i := 1; i < maxi; i++ {
 			fi := float64(i)
 			gc.SetFontData(draw2d.FontData{Name: "luxi", Family: draw2d.FontFamilyMono})
 			gc.SetFillColor(image.Black)
 			gc.SetFontSize(12)
-			gc.FillStringAt(fmt.Sprintf("%d", i), fi*cellWidth+5, 0.5*cellHeight)
+			gc.FillStringAt(fmt.Sprintf("%d", i), 5, (fi+0.5)*cellHeight)
 		}
 		for j := 1; j < maxj; j++ {
 			fj := float64(j)
 			gc.SetFontData(draw2d.FontData{Name: "luxi", Family: draw2d.FontFamilyMono})
 			gc.SetFillColor(image.Black)
 			gc.SetFontSize(12)
-			gc.FillStringAt(fmt.Sprintf("%d", j), 0*cellWidth+5, (fj+0.5)*cellHeight)
+			gc.FillStringAt(fmt.Sprintf("%d", j), fj*cellWidth+5, 0.5*cellHeight)
 		}
 		for i := 1; i < maxi; i++ {
 			for j := 1; j < maxj; j++ {
@@ -342,22 +371,22 @@ func estimate() {
 				fi := float64(i)
 				fj := float64(j)
 				gc.BeginPath() // Initialize a new path
-				gc.MoveTo(fi*cellWidth, fj*cellHeight)
-				gc.LineTo((fi+1)*cellWidth, fj*cellHeight)
-				gc.LineTo((fi+1)*cellWidth, (fj+1)*cellHeight)
-				gc.LineTo(fi*cellWidth, (fj+1)*cellHeight)
-				gc.LineTo(fi*cellWidth, fj*cellHeight)
+				gc.MoveTo(fj*cellWidth, fi*cellHeight)
+				gc.LineTo(fj*cellWidth, (fi+1)*cellHeight)
+				gc.LineTo((fj+1)*cellWidth, (fi+1)*cellHeight)
+				gc.LineTo((fj+1)*cellWidth, fi*cellHeight)
+				gc.LineTo(fj*cellWidth, fi*cellHeight)
 				gc.Close()
 				gc.SetFillColor(color.RGBA{byte(255.0*red), byte(255.0*green), byte(255.0*blue), 0xff})
 				gc.FillStroke()
 				gc.SetFontData(draw2d.FontData{Name: "luxi", Family: draw2d.FontFamilyMono})
 				gc.SetFillColor(image.Black)
 				gc.SetFontSize(8)
-				gc.FillStringAt(txt, fi*cellWidth+5, (fj+0.5)*cellHeight)
+				gc.FillStringAt(txt, fj*cellWidth+5, (fi+0.5)*cellHeight)
 			}
 		}
 		// Save to file
-		draw2dimg.SaveToPngFile(fmt.Sprintf("heap_%d.png", category), dest)
+		draw2dimg.SaveToPngFile(fmt.Sprintf("heat_%d.png", category), dest)
 	}
 	fmt.Printf("Estimation took %s\n", time.Since(startTime))
 }
