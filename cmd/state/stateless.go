@@ -53,7 +53,7 @@ func stateless() {
 	defer ethDb.Close()
 	chainConfig := params.MainnetChainConfig
 	//slFile, err := os.OpenFile("/Volumes/tb4/turbo-geth/stateless.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
-	slFile, err := os.OpenFile("stateless3.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	slFile, err := os.OpenFile("stateless4.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	check(err)
 	defer slFile.Close()
 	w := bufio.NewWriter(slFile)
@@ -87,7 +87,7 @@ func stateless() {
 	tds.SetResolveReads(true)
 	tds.SetNoHistory(true)
 	interrupt := false
-	var thresholdBlock uint64 = 5000000
+	var thresholdBlock uint64 = 5799670
 	for !interrupt {
 		trace := false//blockNum == 5022856
 		if trace {
@@ -181,12 +181,12 @@ func stateless() {
 				}
 				err = dbstate.CheckRoot(header.Root)
 				if err != nil {
-					filename := fmt.Sprintf("right_%d.txt", blockNum)
-					f, err1 := os.Create(filename)
-					if err1 == nil {
-						defer f.Close()
-						tds.PrintTrie(f)
-					}
+					//filename := fmt.Sprintf("right_%d.txt", blockNum)
+					//f, err1 := os.Create(filename)
+					//if err1 == nil {
+					//	defer f.Close()
+					//	tds.PrintTrie(f)
+					//}
 					fmt.Printf("Error processing block %d: %v\n", blockNum, err)
 				}
 				var totalCShorts, totalCValues, totalCodes, totalShorts, totalValues int
