@@ -17,8 +17,18 @@ import (
 	"github.com/llgcode/draw2d/draw2dimg"
 	"image"
 	"image/color"
+	"github.com/petar/GoLLRB/llrb"
 	//"sort"
 )
+
+type KeyItem struct {
+	key common.Hash
+}
+
+func (a *KeyItem) Less(b llrb.Item) bool {
+	bi := b.(*KeyItem)
+	return bytes.Compare(a.key[:], bi.key[:]) < 0
+}
 
 func storageRoot(db *bolt.DB, contract common.Address) (common.Hash, error) {
 	var storageRoot common.Hash
@@ -58,14 +68,11 @@ func actualContractSize(db *bolt.DB, contract common.Address) (int, error) {
 	return actual, nil
 }
 
-func estimateContractSize(seed common.Hash, db *bolt.DB, contract common.Address, probes int, probeWidth int, trace bool) (int, error) {
+func estimateContractSize(seed common.Hash, current *llrb.LLRB, probes int, probeWidth int, trace bool) (int, error) {
 	if trace {
 		fmt.Printf("-----------------------------\n")
 	}
-	var fk [52]byte
-	copy(fk[:], contract[:])
-	var seekkey [52]byte
-	copy(seekkey[:], contract[:])
+	var seekkey KeyItem
 	var large [33]byte
 	large[0] = 1
 	largeInt := big.NewInt(0).SetBytes(large[:])
@@ -73,41 +80,37 @@ func estimateContractSize(seed common.Hash, db *bolt.DB, contract common.Address
 	probeKeyHash := seed[:]
 	probe := big.NewInt(0).SetBytes(seed[:])
 	samples := make(map[[32]byte]*big.Int)
-	if err := db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(state.StorageBucket)
-		c := b.Cursor()
-		var k []byte
-		var overstepped bool
-		for i := 0; i < probes; i++ {
+	curr := big.NewInt(0)
+	prev := big.NewInt(0)
+	allSteps := big.NewInt(0)
+
+	for i := 0; i < probes; i++ {
+		if trace {
+			fmt.Printf("i==%d\n", i)
+		}
+		prev.SetBytes(probeKeyHash)
+		allSteps.SetUint64(0)
+		for ci := 0; ci < 32-len(probeKeyHash); ci++ {
+			seekkey.key[ci] = 0
+		}
+		copy(seekkey.key[32-len(probeKeyHash):], probeKeyHash)
+		if trace {
+			fmt.Printf("seekkey: %x\n", seekkey.key)
+		}
+		var firstK *KeyItem
+		for j := 0; j <= probeWidth; {
 			if trace {
-				fmt.Printf("i==%d\n", i)
+				fmt.Printf("Start with j == %d\n", j)
 			}
-			prev := big.NewInt(0).SetBytes(probeKeyHash)
-			allSteps := big.NewInt(0)
-			if !overstepped {
-				for ci := 20; ci < 20+32-len(probeKeyHash); ci++ {
-					seekkey[ci] = 0
+			current.AscendGreaterOrEqual(&seekkey, func(item llrb.Item) bool {
+				if j > probeWidth {
+					return false
 				}
-				copy(seekkey[20+32-len(probeKeyHash):], probeKeyHash)
+				k := item.(*KeyItem)
 				if trace {
-					fmt.Printf("seekkey: %x\n", seekkey[20:])
+					fmt.Printf("j == %d, %x\n", j, k.key)
 				}
-				k, _ = c.Seek(seekkey[:])
-			}
-			for j := 0; j < probeWidth+1; j++ {
-				if trace {
-					fmt.Printf("j==%d\n", j)
-				}
-				if k == nil || !bytes.HasPrefix(k, contract[:]) {
-					k, _ = c.Seek(fk[:])
-					if k == nil || !bytes.HasPrefix(k, contract[:]) {
-						panic("")
-					}
-				}
-				if trace {
-					fmt.Printf("%x\n", k[20:])
-				}
-				curr := big.NewInt(0).SetBytes(k[20:])
+				curr.SetBytes(k.key[:])
 				diff := big.NewInt(0)
 				if prev.Cmp(curr) < 0 {
 					diff.Sub(curr, prev)
@@ -115,38 +118,40 @@ func estimateContractSize(seed common.Hash, db *bolt.DB, contract common.Address
 					diff.Sub(prev, curr)
 					diff.Sub(largeInt, diff)
 				}
-				allSteps.Add(allSteps, diff)
-				if !overstepped {
-					var sampleEnd [32]byte
-					copy(sampleEnd[:], k[20:])
-					if _, ok := samples[sampleEnd]; !ok || j > 0 {
-						samples[sampleEnd] = diff
-					}
+				allSteps.Add(allSteps, diff)	
+				if _, ok := samples[k.key]; !ok || j > 0 {
+					samples[k.key] = diff
 				}
-				prev.SetBytes(k[20:])
-				if j < probeWidth {
-					k, _ = c.Next()
+				prev.SetBytes(k.key[:])
+				j++
+				if firstK == nil {
+					firstK = k
+				} else if k == firstK {
+					j = probeWidth + 1
 				}
-				overstepped = false
-			}
-			if allSteps.Cmp(sectorSize) < 0 {
-				probe.Add(probe, sectorSize)
-				overstepped = false
-			} else {
+				return true
+			})
+			if j <= probeWidth {
+				for ci := 0; ci < 32; ci++ {
+					seekkey.key[ci] = 0
+				}
 				if trace {
-					fmt.Printf("Move by allSteps\n")
+					fmt.Printf("Looping at j == %d\n", j)
 				}
-				probe.Add(probe, allSteps)
-				overstepped = true
 			}
-			for probe.Cmp(largeInt) >= 0 {
-				probe.Sub(probe, largeInt)
-			}
-			probeKeyHash = probe.Bytes()
 		}
-		return nil
-	}); err != nil {
-		return 0, err
+		if allSteps.Cmp(sectorSize) < 0 {
+			probe.Add(probe, sectorSize)
+		} else {
+			if trace {
+				fmt.Printf("Move by allSteps\n")
+			}
+			probe.Add(probe, allSteps)
+		}
+		for probe.Cmp(largeInt) >= 0 {
+			probe.Sub(probe, largeInt)
+		}
+		probeKeyHash = probe.Bytes()
 	}
 	total := big.NewInt(0)
 	for _, sample := range samples {
@@ -203,16 +208,75 @@ func getHeatMapColor(value float64) (red, green, blue float64) {
   return
 }
 
-func itemsByAddress(db *bolt.DB) (map[common.Address]int, []common.Address) {
+func estimateContract(idx int, current *llrb.LLRB, seed common.Hash, valMap map[int][][]float64, maxi, maxj int, trace bool) bool {
+	allVals := valMap[0]
+	actual := current.Len()
+	if trace {
+		fmt.Printf("Actual size: %d\n", actual)
+	}
+	if actual < 2 {
+		return false
+	}
+	category := int(math.Log2(float64(actual)))
+	if category != 1 {
+		//return false
+	}
+	//fmt.Printf("%d\n", idx)
+	vals, ok := valMap[category]
+	if !ok {
+		vals = make([][]float64, maxi)
+		for i := 1; i < maxi; i++ {
+			vals[i] = make([]float64, maxj)
+		}
+		valMap[category] = vals
+	}
+	for i := 1; i < maxi; i++ {
+		for j := 1; j < maxj; j++ {
+			estimated, err := estimateContractSize(seed, current, i, j, trace)
+			check(err)
+			e := math.Abs((float64(actual)-float64(estimated))/float64(actual))
+			if e > vals[i][j] {
+				vals[i][j] = e
+			}
+			if e > allVals[i][j] {
+				allVals[i][j] = e
+			}
+			if e > 0.5 && i == 1 && j == 5 {
+				//fmt.Printf("%d\n", idx)
+			} 
+		}
+	}
+	return true
+}
+
+func estimate() {
+	startTime := time.Now()
+	db, err := bolt.Open("/Volumes/tb4/turbo-geth-10/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
+	//db, err := bolt.Open("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
+	//db, err := bolt.Open("/home/akhounov/.ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
+	check(err)
+	defer db.Close()
+	maxi := 20
+	maxj := 50
+	//maxi := 2
+	//maxj := 10
+	trace := false
+	valMap := make(map[int][][]float64)
+	allVals := make([][]float64, maxi)
+	for i := 1; i < maxi; i++ {
+		allVals[i] = make([]float64, maxj)
+	}
+	valMap[0] = allVals
+
 	// Go through the current state
 	var addr common.Address
 	itemsByAddress := make(map[common.Address]int)
-	var list []common.Address
 	deleted := make(map[common.Address]bool) // Deleted contracts
 	numDeleted := 0
-	//itemsByCreator := make(map[common.Address]int)
+	var current *llrb.LLRB
 	count := 0
-	err := db.View(func(tx *bolt.Tx) error {
+	contractCount := 0
+	err = db.View(func(tx *bolt.Tx) error {
 		a := tx.Bucket(state.AccountsBucket)
 		b := tx.Bucket(state.StorageBucket)
 		if b == nil {
@@ -233,8 +297,25 @@ func itemsByAddress(db *bolt.DB) (map[common.Address]int, []common.Address) {
 				continue
 			}
 			if _, ok := itemsByAddress[addr]; !ok {
-				list = append(list, addr)
+				if current != nil {
+					seed, err := storageRoot(db, addr)
+					check(err)
+					//if contractCount == 4 {
+					done := estimateContract(contractCount, current, seed, valMap, maxi, maxj, trace)
+					if done && trace {
+						return nil
+					}
+					//}
+					contractCount++
+					if contractCount % 1000 == 0 {
+						fmt.Printf("Processed contracts: %d\n", contractCount)
+					}
+				}
+				current = llrb.New()
 			}
+			ki := &KeyItem{}
+			copy(ki.key[:], k[20:])
+			current.InsertNoReplace(ki)
 			itemsByAddress[addr]++
 			count++
 			if count%100000 == 0 {
@@ -244,75 +325,7 @@ func itemsByAddress(db *bolt.DB) (map[common.Address]int, []common.Address) {
 		return nil
 	})
 	check(err)
-	return itemsByAddress, list
-}
 
-func estimate() {
-	startTime := time.Now()
-	db, err := bolt.Open("/Volumes/tb4/turbo-geth-10/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	//db, err := bolt.Open("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	//db, err := bolt.Open("/home/akhounov/.ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	check(err)
-	defer db.Close()
-	contractMap, list := itemsByAddress(db)
-	fmt.Printf("Collected itemsByAddress: %d\n", len(contractMap))
-	maxi := 20
-	maxj := 50
-	trace := false
-	valMap := make(map[int][][]float64)
-	allVals := make([][]float64, maxi)
-	for i := 1; i < maxi; i++ {
-		allVals[i] = make([]float64, maxj)
-	}
-	valMap[0] = allVals
-	count := 0
-	for _, addr := range list {
-		actual := contractMap[addr]
-		if actual < 2 {
-			continue
-		}
-		category := int(math.Log2(float64(actual)))
-		if category != 2 {
-			//continue
-		}
-		//fmt.Printf("%d\n", idx)
-		vals, ok := valMap[category]
-		if !ok {
-			vals = make([][]float64, maxi)
-			for i := 1; i < maxi; i++ {
-				vals[i] = make([]float64, maxj)
-			}
-			valMap[category] = vals
-		}
-		seed, err := storageRoot(db, addr)
-		check(err)
-		for i := 1; i < maxi; i++ {
-			for j := 1; j < maxj; j++ {
-				estimated, err := estimateContractSize(seed, db, addr, i, j, trace)
-				check(err)
-				e := math.Abs((float64(actual)-float64(estimated))/float64(actual))
-				if e > vals[i][j] {
-					vals[i][j] = e
-				}
-				if e > allVals[i][j] {
-					allVals[i][j] = e
-				}
-				if e > 1.0 && i == 1 && j == 5 {
-					//fmt.Printf("%d\n", idx)
-				} 
-			}
-		}
-		count++
-		if count % 1000 == 0 {
-			fmt.Printf("Processed contracts: %d\n", count)
-		}
-		if trace {
-			fmt.Printf("Actual size: %d\n", actual)
-		}
-		if trace {
-			break
-		}
-	}
 	fmt.Printf("Generating images...\n")
 	for category, vals := range valMap {
 		var maxe float64

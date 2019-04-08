@@ -101,7 +101,7 @@ func (t *LLRB) ascendLessThan(h *Node, pivot Item, iterator ItemIterator) bool {
 		return false
 	}
 	if less(h.Item, pivot) {
-		return t.ascendLessThan(h.Left, pivot, iterator)
+		return t.ascendLessThan(h.Right, pivot, iterator)
 	}
 	return true
 }
