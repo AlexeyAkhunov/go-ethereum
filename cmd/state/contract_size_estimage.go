@@ -208,7 +208,17 @@ func getHeatMapColor(value float64) (red, green, blue float64) {
   return
 }
 
-func estimateContract(idx int, current *llrb.LLRB, seed common.Hash, valMap map[int][][]float64, maxi, maxj int, trace bool) bool {
+func estimateContract(
+	idx int,
+	current *llrb.LLRB,
+	seed common.Hash,
+	valMap map[int][][]float64,
+	maxValMap map[int][][]float64,
+	valCount map[int]int,
+	maxi, maxj int,
+	trace bool,
+) bool {
+	maxAllVals := maxValMap[0]
 	allVals := valMap[0]
 	actual := current.Len()
 	if trace {
@@ -222,6 +232,14 @@ func estimateContract(idx int, current *llrb.LLRB, seed common.Hash, valMap map[
 		//return false
 	}
 	//fmt.Printf("%d\n", idx)
+	maxVals, ok := maxValMap[category]
+	if !ok {
+		maxVals = make([][]float64, maxi)
+		for i := 1; i < maxi; i++ {
+			maxVals[i] = make([]float64, maxj)
+		}
+		maxValMap[category] = maxVals
+	}
 	vals, ok := valMap[category]
 	if !ok {
 		vals = make([][]float64, maxi)
@@ -234,18 +252,20 @@ func estimateContract(idx int, current *llrb.LLRB, seed common.Hash, valMap map[
 		for j := 1; j < maxj; j++ {
 			estimated, err := estimateContractSize(seed, current, i, j, trace)
 			check(err)
-			e := math.Abs((float64(actual)-float64(estimated))/float64(actual))
-			if e > vals[i][j] {
-				vals[i][j] = e
+			e := (float64(actual)-float64(estimated))/float64(actual)
+			eAbs := math.Abs(e)
+			if eAbs > maxVals[i][j] {
+				maxVals[i][j] = eAbs
 			}
-			if e > allVals[i][j] {
-				allVals[i][j] = e
+			if eAbs > maxAllVals[i][j] {
+				maxAllVals[i][j] = eAbs
 			}
-			if e > 0.5 && i == 1 && j == 5 {
-				//fmt.Printf("%d\n", idx)
-			} 
+			vals[i][j] += e
+			allVals[i][j] += e
 		}
 	}
+	valCount[category]++
+	valCount[0]++
 	return true
 }
 
@@ -261,12 +281,19 @@ func estimate() {
 	//maxi := 2
 	//maxj := 10
 	trace := false
+	maxValMap := make(map[int][][]float64)
+	maxAllVals := make([][]float64, maxi)
+	for i := 1; i < maxi; i++ {
+		maxAllVals[i] = make([]float64, maxj)
+	}
+	maxValMap[0] = maxAllVals
 	valMap := make(map[int][][]float64)
 	allVals := make([][]float64, maxi)
 	for i := 1; i < maxi; i++ {
 		allVals[i] = make([]float64, maxj)
 	}
 	valMap[0] = allVals
+	valCount := make(map[int]int)
 
 	// Go through the current state
 	var addr common.Address
@@ -301,7 +328,7 @@ func estimate() {
 					seed, err := storageRoot(db, addr)
 					check(err)
 					//if contractCount == 4 {
-					done := estimateContract(contractCount, current, seed, valMap, maxi, maxj, trace)
+					done := estimateContract(contractCount, current, seed, valMap, maxValMap, valCount, maxi, maxj, trace)
 					if done && trace {
 						return nil
 					}
@@ -326,17 +353,26 @@ func estimate() {
 	})
 	check(err)
 
+	for category, vals := range valMap {
+		for i := 1; i < maxi; i++ {
+			for j := 1; j < maxj; j++ {
+				vals[i][j] /= float64(valCount[category])
+			}
+		} 
+	}
+
 	fmt.Printf("Generating images...\n")
 	for category, vals := range valMap {
 		var maxe float64
 		var mine float64 = 100000000.0
 		for i := 1; i < maxi; i++ {
 			for j := 1; j < maxj; j++ {
-				if vals[i][j] > maxe {
-					maxe = vals[i][j]
+				a := math.Abs(vals[i][j])
+				if a > maxe {
+					maxe = a
 				}
-				if vals[i][j] < mine {
-					mine = vals[i][j]
+				if a < mine {
+					mine = a
 				}
 			}
 		}
