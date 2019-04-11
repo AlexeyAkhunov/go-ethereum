@@ -140,6 +140,60 @@ func construct_snapshot(ethDb ethdb.Database, stateDb ethdb.Database, db *bolt.D
 	check(err)	
 }
 
+func save_snapshot(db *bolt.DB, filename string) {
+	fmt.Printf("Saving snapshot to %s\n", filename)
+	diskDb, err := bolt.Open(filename, 0600, &bolt.Options{})
+	check(err)
+	defer diskDb.Close()
+	diskTx, err := diskDb.Begin(true)
+	check(err)
+	bDisk, err := diskTx.CreateBucket(state.AccountsBucket)
+	check(err)
+	sbDisk, err := diskTx.CreateBucket(state.StorageBucket)
+	check(err)
+	count := 0
+	err = db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(state.AccountsBucket)
+		c := b.Cursor()
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			if err := bDisk.Put(common.CopyBytes(k), common.CopyBytes(v)); err != nil {
+				return err
+			}
+			count++
+			if count % 100000 == 0 {
+				if err := diskTx.Commit(); err != nil {
+					return err
+				}
+				fmt.Printf("Commited %d records\n", count)
+				diskTx, err = diskDb.Begin(true)
+				bDisk = diskTx.Bucket(state.AccountsBucket)
+				sbDisk = diskTx.Bucket(state.StorageBucket)
+			}
+		}
+		b = tx.Bucket(state.StorageBucket)
+		c = b.Cursor()
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			if err := sbDisk.Put(common.CopyBytes(k), common.CopyBytes(v)); err != nil {
+				return err
+			}
+			count++
+			if count % 100000 == 0 {
+				if err := diskTx.Commit(); err != nil {
+					return err
+				}
+				fmt.Printf("Commited %d records\n", count)
+				diskTx, err = diskDb.Begin(true)
+				bDisk = diskTx.Bucket(state.AccountsBucket)
+				sbDisk = diskTx.Bucket(state.StorageBucket)
+			}
+		}
+		return nil
+	})
+	check(err)
+	err = diskTx.Commit()
+	check(err)
+}
+
 func load_snapshot(stateDb ethdb.Database, db *bolt.DB, filename string) {
 	fmt.Printf("Loading snapshot from %s\n", filename)
 	diskDb, err := bolt.Open(filename, 0600, &bolt.Options{})
@@ -357,8 +411,8 @@ func state_snapshot() {
 	startTime := time.Now()
 	var blockNum uint64 = uint64(*block)
 	//ethDb, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
-	ethDb, err := ethdb.NewLDBDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
-	//ethDb, err := ethdb.NewLDBDatabase("/home/akhounov/.ethereum/geth/chaindata1")
+	//ethDb, err := ethdb.NewLDBDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
+	ethDb, err := ethdb.NewLDBDatabase("/home/akhounov/.ethereum/geth/chaindata1")
 	check(err)
 	defer ethDb.Close()
 	stateDb, db := ethdb.NewMemDatabase2()

@@ -1455,6 +1455,11 @@ func (tsw *TrieStateWriter) UpdateAccountCode(codeHash common.Hash, code []byte)
 }
 
 func (dsw *DbStateWriter) UpdateAccountCode(codeHash common.Hash, code []byte) error {
+	if dsw.tds.resolveReads {
+		if _, ok := dsw.tds.createdCodes[codeHash]; !ok {
+			dsw.tds.createdCodes[codeHash] = struct{}{}
+		}
+	}
 	return dsw.tds.db.Put(CodeBucket, codeHash[:], code)
 }
 

@@ -35,7 +35,7 @@ var chartColors = []drawing.Color{
 }
 
 func stateless() {
-	state.MaxTrieCacheGen = 64*1024*1024
+	//state.MaxTrieCacheGen = 64*1024*1024
 	startTime := time.Now()
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
@@ -87,7 +87,7 @@ func stateless() {
 	tds.SetResolveReads(true)
 	tds.SetNoHistory(true)
 	interrupt := false
-	var thresholdBlock uint64 = 5799670
+	var thresholdBlock uint64 = 8000000
 	for !interrupt {
 		trace := false//blockNum == 5022856
 		if trace {
@@ -143,6 +143,9 @@ func stateless() {
 		}
 		if _, err := batch.Commit(); err != nil {
 			panic(err)
+		}
+		if blockNum % 500000 == 0 {
+			save_snapshot(db, fmt.Sprintf("state_%d", blockNum))
 		}
 		if blockNum >= thresholdBlock {
 			contracts, cMasks, cHashes, cShortKeys, cValues, codes, masks, hashes, shortKeys, values := tds.ExtractProofs(trace)
