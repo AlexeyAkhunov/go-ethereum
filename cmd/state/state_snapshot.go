@@ -194,7 +194,7 @@ func save_snapshot(db *bolt.DB, filename string) {
 	check(err)
 }
 
-func load_snapshot(stateDb ethdb.Database, db *bolt.DB, filename string) {
+func load_snapshot(db *bolt.DB, filename string) {
 	fmt.Printf("Loading snapshot from %s\n", filename)
 	diskDb, err := bolt.Open(filename, 0600, &bolt.Options{})
 	check(err)
@@ -418,7 +418,7 @@ func state_snapshot() {
 	stateDb, db := ethdb.NewMemDatabase2()
 	defer stateDb.Close()
 	if _, err := os.Stat("statedb0"); err == nil {
-		load_snapshot(stateDb, db, "statedb0")
+		load_snapshot(db, "statedb0")
 		load_codes(db, ethDb)
 	} else {
 		construct_snapshot(ethDb, stateDb, db, blockNum)
@@ -484,4 +484,24 @@ func state_snapshot() {
 	}
 	check_roots(stateDb, db, nextBlock.Root(), blockNum+1)
 	//compare_snapshot(stateDb, db, "statedb1")
+}
+
+func verify_snapshot() {
+	//ethDb, err := ethdb.NewLDBDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
+	ethDb, err := ethdb.NewLDBDatabase("/home/akhounov/.ethereum/geth/chaindata1")
+	check(err)
+	defer ethDb.Close()
+	engine := ethash.NewFullFaker()
+	chainConfig := params.MainnetChainConfig
+	bcb, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vm.Config{}, nil)
+	check(err)
+	blockNum := uint64(*block)
+	block := bcb.GetBlockByNumber(blockNum)
+	fmt.Printf("Block number: %d\n", blockNum)
+	fmt.Printf("Block root hash: %x\n", block.Root())
+	preRoot := block.Root()
+	stateDb, db := ethdb.NewMemDatabase2()
+	defer stateDb.Close()
+	load_snapshot(db, fmt.Sprintf("state_%d", blockNum))	
+	check_roots(stateDb, db, preRoot, blockNum)
 }

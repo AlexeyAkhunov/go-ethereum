@@ -73,7 +73,7 @@ func stateless() {
 		check(err)
 		preRoot = genesisBlock.Header().Root
 	} else {
-		load_snapshot(stateDb, db, "statedb0")
+		load_snapshot(db, "statedb0")
 		load_codes(db, ethDb)		
 		block := bcb.GetBlockByNumber(blockNum-1)
 		fmt.Printf("Block number: %d\n", blockNum-1)
