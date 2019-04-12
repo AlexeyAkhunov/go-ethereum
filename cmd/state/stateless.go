@@ -84,7 +84,7 @@ func stateless() {
 	batch := stateDb.NewBatch()
 	tds, err := state.NewTrieDbState(preRoot, batch, blockNum-1)
 	check(err)
-	tds.SetResolveReads(true)
+	//tds.SetResolveReads(true)
 	tds.SetNoHistory(true)
 	interrupt := false
 	var thresholdBlock uint64 = 8000000
