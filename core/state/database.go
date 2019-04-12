@@ -1216,10 +1216,10 @@ func (tds *TrieDbState) getStorageTrie(address common.Address, addrHash common.H
 			return nil, err
 		}
 		if account == nil {
-			fmt.Printf("Creating storage trie for address %x with empty storage root\n", address)
+			//fmt.Printf("Creating storage trie for address %x with empty storage root\n", address)
 			t = trie.New(common.Hash{}, StorageBucket, address[:], true)
 		} else {
-			fmt.Printf("Creating storage trie for address %x with storage root %x\n", address, account.Root)
+			//fmt.Printf("Creating storage trie for address %x with storage root %x\n", address, account.Root)
 			t = trie.New(account.Root, StorageBucket, address[:], true)
 		}
 		t.SetHistorical(tds.historical)
