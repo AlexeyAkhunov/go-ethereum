@@ -217,7 +217,7 @@ func stateless() {
 		preRoot = header.Root
 		blockNum++
 		if blockNum % 1000 == 0 {
-			tds.PruneTries(true)
+			//tds.PruneTries(true)
 			fmt.Printf("Processed %d blocks\n", blockNum)
 		}
 		// Check for interrupts
