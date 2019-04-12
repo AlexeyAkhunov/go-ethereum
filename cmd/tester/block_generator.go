@@ -140,10 +140,10 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 		// Add more transactions
 		signedTxs := []*types.Transaction{}
 		receipts := []*types.Receipt{}
+		usedGas := new(uint64)
 		if height > 1 && gasLimit >= 21000 {
 			signer := types.MakeSigner(chainConfig, big.NewInt(int64(height)))
 			gp := new(core.GasPool).AddGas(header.GasLimit)
-			usedGas := new(uint64)
 			vmConfig := vm.Config{}
 
 			to := randAddress(r)
@@ -178,6 +178,7 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 		if err != nil {
 			return nil, err
 		}
+		header.GasUsed = *usedGas
 		tds.SetBlockNr(uint64(height))
 		err = statedb.Commit(chainConfig.IsEIP158(header.Number), tds.DbStateWriter())
 		if err != nil {

@@ -1733,7 +1733,7 @@ func main() {
 	//nakedSloadChart()
 	//nakedAccountChart()
 	//specExecChart1()
-	//stateless()
+	stateless()
 	//stateless_chart_key_values([]int{17}, "total.png", 1, 0)
 	//stateless_chart_key_values([]int{17}, "total_2675000.png", 2675000, 0)
 	//stateless_chart_key_values([]int{12, 15, 16}, "breakdown.png", 1, 1)
@@ -1745,5 +1745,5 @@ func main() {
 	//stateless_chart_key_values([]int{12}, "codes_28m.png", 2800000)
 	//state_snapshot()
 	//estimate()
-	verify_snapshot()
+	//verify_snapshot()
 }

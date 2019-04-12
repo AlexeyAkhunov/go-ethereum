@@ -73,7 +73,7 @@ func stateless() {
 		check(err)
 		preRoot = genesisBlock.Header().Root
 	} else {
-		load_snapshot(db, "statedb0")
+		load_snapshot(db, fmt.Sprintf("state_%d", blockNum-1))
 		load_codes(db, ethDb)		
 		block := bcb.GetBlockByNumber(blockNum-1)
 		fmt.Printf("Block number: %d\n", blockNum-1)
@@ -144,7 +144,7 @@ func stateless() {
 		if _, err := batch.Commit(); err != nil {
 			panic(err)
 		}
-		if blockNum % 500000 == 0 {
+		if (blockNum % 500000 == 0) || (blockNum > 5000000 && blockNum % 100000 == 0) {
 			save_snapshot(db, fmt.Sprintf("state_%d", blockNum))
 		}
 		if blockNum >= thresholdBlock {
@@ -217,7 +217,7 @@ func stateless() {
 		preRoot = header.Root
 		blockNum++
 		if blockNum % 1000 == 0 {
-			//tds.PruneTries(true)
+			tds.PruneTries(true)
 			fmt.Printf("Processed %d blocks\n", blockNum)
 		}
 		// Check for interrupts
