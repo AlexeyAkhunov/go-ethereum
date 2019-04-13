@@ -144,7 +144,7 @@ func stateless() {
 		if _, err := batch.Commit(); err != nil {
 			panic(err)
 		}
-		if (blockNum % 500000 == 0) || (blockNum > 5000000 && blockNum % 100000 == 0) {
+		if (blockNum % 500000 == 0) || (blockNum > 5600000 && blockNum % 100000 == 0) {
 			save_snapshot(db, fmt.Sprintf("state_%d", blockNum))
 		}
 		if blockNum >= thresholdBlock {
