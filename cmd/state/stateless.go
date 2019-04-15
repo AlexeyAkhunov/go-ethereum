@@ -87,11 +87,11 @@ func stateless() {
 	tds.SetResolveReads(false)
 	tds.SetNoHistory(true)
 	interrupt := false
-	var thresholdBlock uint64 = 8000000
+	var thresholdBlock uint64 = 5300000
 	for !interrupt {
-		trace := false//blockNum == 5022856
+		trace := false
 		if trace {
-			filename := fmt.Sprintf("right_%d.txt", blockNum-1)
+			filename := fmt.Sprintf("right_%d.txt", blockNum)
 			f, err1 := os.Create(filename)
 			if err1 == nil {
 				defer f.Close()
@@ -184,12 +184,12 @@ func stateless() {
 				}
 				err = dbstate.CheckRoot(header.Root)
 				if err != nil {
-					//filename := fmt.Sprintf("right_%d.txt", blockNum)
-					//f, err1 := os.Create(filename)
-					//if err1 == nil {
-					//	defer f.Close()
-					//	tds.PrintTrie(f)
-					//}
+					filename := fmt.Sprintf("right_%d.txt", blockNum+1)
+					f, err1 := os.Create(filename)
+					if err1 == nil {
+						defer f.Close()
+						tds.PrintTrie(f)
+					}
 					fmt.Printf("Error processing block %d: %v\n", blockNum, err)
 				}
 				var totalCShorts, totalCValues, totalCodes, totalShorts, totalValues int

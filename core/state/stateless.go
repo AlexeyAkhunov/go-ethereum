@@ -98,7 +98,7 @@ func NewStateless(stateRoot common.Hash,
 			return nil, err
 		}
 		if account.Root != st.Hash() {
-			filename := fmt.Sprintf("root_%d.txt", blockNr)
+			filename := fmt.Sprintf("root_%d.txt", blockNr-1)
 			f, err := os.Create(filename)
 			if err == nil {
 				defer f.Close()
@@ -229,7 +229,7 @@ func (s *Stateless) CheckRoot(expected common.Hash) error {
 		}
 		for keyHash, v := range m {
 			if len(v) != 0 {
-				if err := t.TryUpdate(nil, keyHash[:], v, s.blockNr); err != nil {
+				if err := t.TryUpdate(nil, keyHash[:], v, s.blockNr-1); err != nil {
 					return err
 				}
 			}
@@ -246,7 +246,7 @@ func (s *Stateless) CheckRoot(expected common.Hash) error {
 		}
 		for keyHash, v := range m {
 			if len(v) == 0 {
-				if err := t.TryDelete(nil, keyHash[:], s.blockNr); err != nil {
+				if err := t.TryDelete(nil, keyHash[:], s.blockNr-1); err != nil {
 					return err
 				}
 			}
@@ -269,21 +269,21 @@ func (s *Stateless) CheckRoot(expected common.Hash) error {
 			if err != nil {
 				return err
 			}
-			if err := s.t.TryUpdate(nil, addrHash[:], data, s.blockNr); err != nil {
+			if err := s.t.TryUpdate(nil, addrHash[:], data, s.blockNr-1); err != nil {
 				return err
 			}
 		}
 	}
 	for addrHash, account := range s.accountUpdates {
 		if account == nil {
-			if err := s.t.TryDelete(nil, addrHash[:], s.blockNr); err != nil {
+			if err := s.t.TryDelete(nil, addrHash[:], s.blockNr-1); err != nil {
 				return err
 			}
 		}
 	}
 	myRoot := s.t.Hash()
 	if myRoot != expected {
-		filename := fmt.Sprintf("root_%d.txt", s.blockNr+1)
+		filename := fmt.Sprintf("root_%d.txt", s.blockNr)
 		f, err := os.Create(filename)
 		if err == nil {
 			defer f.Close()
