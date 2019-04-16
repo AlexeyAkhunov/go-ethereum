@@ -137,6 +137,65 @@ func NewStateless(stateRoot common.Hash,
 	}, nil
 }
 
+func (s *Stateless) ThinProof(
+	contracts []common.Address,
+	cMasks []uint32,
+	cHashes []common.Hash,
+	cShortKeys [][]byte,
+	cValues [][]byte,
+	codes [][]byte,
+	masks []uint32,
+	hashes []common.Hash,
+	shortKeys [][]byte,
+	values [][]byte,
+) (
+	aContracts []common.Address,
+	acMasks []uint32,
+	acHashes []common.Hash,
+	acShortKeys [][]byte,
+	acValues [][]byte,
+	acodes [][]byte,
+	aMasks []uint32,
+	aHashes []common.Hash,
+	aShortKeys [][]byte,
+	aValues [][]byte,
+) {
+	h := newHasher()
+	defer returnHasherToPool(h)
+	_, _, _, _, aMasks, aShortKeys, aValues, aHashes = s.t.AmmendProofs(masks, shortKeys, values, hashes, aMasks, aShortKeys, aValues, aHashes, s.trace)
+	var maskIdx, hashIdx, shortIdx, valueIdx int
+	for _, contract := range contracts {
+		if s.trace {
+			fmt.Printf("TRIE %x ==============================================\n", contract)
+		}
+		h.sha.Reset()
+		h.sha.Write(contract[:])
+		var addrHash common.Hash
+		h.sha.Read(addrHash[:])
+		var st *trie.Trie
+		var ok bool
+		var mIdx, hIdx, sIdx, vIdx int
+		if st, ok = s.storageTries[addrHash]; !ok {
+			st, mIdx, hIdx, sIdx, vIdx = trie.NewFromProofs(StorageBucket, nil, true, cMasks[maskIdx:], cShortKeys[shortIdx:], cValues[valueIdx:], cHashes[hashIdx:], s.trace)
+			s.storageTries[addrHash] = st
+			acMasks = append(acMasks, cMasks[maskIdx:mIdx]...)
+			acShortKeys = append(acShortKeys, cShortKeys[shortIdx:sIdx]...)
+			acValues = append(acValues, cValues[valueIdx:vIdx]...)
+			acHashes = append(acHashes, cHashes[hashIdx:hIdx]...)
+		} else {
+			mIdx, hIdx, sIdx, vIdx, acMasks, acShortKeys, acValues, acHashes = st.AmmendProofs(
+				cMasks[maskIdx:], cShortKeys[shortIdx:], cValues[valueIdx:], cHashes[hashIdx:],
+				acMasks, acShortKeys, acValues, acHashes,
+				s.trace)
+		}
+		maskIdx += mIdx
+		shortIdx += sIdx
+		hashIdx += hIdx
+		valueIdx += vIdx
+	}
+	return
+}
+
 func (s *Stateless) SetBlockNr(blockNr uint64) {
 	s.blockNr = blockNr
 }

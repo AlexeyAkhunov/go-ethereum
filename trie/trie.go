@@ -243,6 +243,145 @@ func NewFromProofs(bucket []byte,
 	return t, maskIdx, hashIdx, shortIdx, valueIdx
 }
 
+func ammend(n node,
+	pos int,
+	masks []uint32,
+	shortKeys [][]byte,
+	values [][]byte,
+	hashes []common.Hash,
+	maskIdx, shortIdx, valueIdx, hashIdx *int,
+	aMasks []uint32,
+	aShortKeys [][]byte,
+	aValues [][]byte,
+	aHashes []common.Hash,
+	trace bool,
+) ([]uint32, [][]byte, [][]byte, []common.Hash, bool) {
+	fullMask := masks[*maskIdx]
+	(*maskIdx)++
+	mask := fullMask & 0xffff
+	downmask := fullMask >> 16
+	if trace {
+		fmt.Printf("%spos: %d, mask: %16b, down: %16b", strings.Repeat(" ", pos), pos, mask, downmask)
+	}
+	aAnything := false
+	if mask == 0 {
+		// short node (leaf or extension)
+		nKey := shortKeys[*shortIdx]
+		(*shortIdx)++
+		s, ok := n.(*shortNode)
+		if trace {
+			fmt.Printf("\n")
+		}
+		if pos + len(nKey) == 65 {
+			value := values[*valueIdx]
+			s.Val = valueNode(value)
+			(*valueIdx)++
+			if !ok {
+				aMasks = append(aMasks, 0)
+				aShortKeys = append(aShortKeys, nKey)
+				aValues = append(aValues, value)
+				aAnything = true
+			}
+		} else {
+			if trace {
+				fmt.Printf("%spos = %d, len(nKey) = %d, nKey = %x\n", strings.Repeat(" ", pos), pos, len(nKey), nKey)
+			}
+			if downmask == 0 {
+				if trace {
+					fmt.Printf("%shash: %x\n", strings.Repeat(" ", pos), hashes[*hashIdx][:2])
+				}
+				hash := hashes[*hashIdx]
+				s.Val = hashNode(hash[:])
+				(*hashIdx)++
+				if !ok {
+					aMasks = append(aMasks, 0)
+					aShortKeys = append(aShortKeys, nKey)
+					aHashes = append(aHashes, hash)
+					aAnything = true
+				}
+			} else {
+				var val node
+				if ok {
+					aMasks = append(aMasks, uint32(1)<<16)
+					aShortKeys = append(aShortKeys, nKey)
+					val = s.Val
+				}
+				var anything bool
+				aMasks, aShortKeys, aValues, aHashes, anything = ammend(
+					val, pos+len(nKey), masks, shortKeys, values, hashes,
+					maskIdx, shortIdx, valueIdx, hashIdx,
+					aMasks, aShortKeys, aValues, aHashes,
+					trace)
+				if ok && !anything {
+					// Rewind masks and the short keys
+					aMasks = aMasks[:len(aMasks)-1]
+					aShortKeys = aShortKeys[:len(aShortKeys)-1]
+				} else {
+					aAnything = true
+				}
+			}
+		}
+	} else {
+		mask &^= downmask
+		if trace {
+			fmt.Printf("%s, hashes:", strings.Repeat(" ", pos), )
+		}
+		// Make a full node
+		f, ok := n.(*fullNode)
+		for nibble := byte(0); nibble < 16; nibble++ {
+			if (mask & (uint32(1)<<nibble)) != 0 {
+				if trace {
+					fmt.Printf(" %x", hashes[*hashIdx][:2])
+				}
+				hash := hashes[*hashIdx]
+				f.Children[nibble] = hashNode(hash[:])
+				(*hashIdx)++
+				if !ok {
+					aHashes = append(aHashes, hash)
+				}
+			} else {
+				f.Children[nibble] = nil
+				if trace {
+					fmt.Printf(" ....")
+				}
+			}
+		}
+		if trace {
+			fmt.Printf("\n")
+		}
+		for nibble := byte(0); nibble < 16; nibble++ {
+			if (downmask & (uint32(1)<<nibble)) != 0 {
+				if trace {
+					fmt.Printf("%sIn the loop at pos: %d, mask: %16b, down: %16b, nibble %x\n", strings.Repeat(" ", pos), pos, fullMask & 0xffff, downmask, nibble)
+				}
+				f.Children[nibble] = construct(pos+1, masks, shortKeys, values, hashes, maskIdx, shortIdx, valueIdx, hashIdx, trace)
+			}
+		}
+	}
+	return aMasks, aShortKeys, aValues, aHashes, aAnything
+}
+
+func (t *Trie) AmmendProofs(
+	masks []uint32,
+	shortKeys [][]byte,
+	values [][]byte,
+	hashes []common.Hash,
+	aMasks []uint32,
+	aShortKeys [][]byte,
+	aValues [][]byte,
+	aHashes []common.Hash,
+	trace bool,
+) (mIdx, hIdx, sIdx, vIdx int, aMasks_ []uint32, aShortKeys_ [][]byte, aValues_ [][]byte, aHashes_ []common.Hash) {
+	var maskIdx int
+	var hashIdx int // index in the hashes
+	var shortIdx int // index in the shortKeys
+	var valueIdx int // inde in the values
+	aMasks_, aShortKeys_, aValues_, aHashes_, _ = ammend(t.root, 0, masks, shortKeys, values, hashes,
+		&maskIdx, &shortIdx, &valueIdx, &hashIdx,
+		aMasks, aShortKeys, aValues, aHashes, trace)
+	return maskIdx, hashIdx, shortIdx, valueIdx, aMasks_, aShortKeys_, aValues_, aHashes_
+}
+
 func (t *Trie) SetHistorical(h bool) {
 	t.historical = h
 	if h && !bytes.HasPrefix(t.bucket, []byte("h")) {

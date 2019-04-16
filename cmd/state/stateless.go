@@ -47,17 +47,22 @@ func stateless() {
 	}()
 
 	//ethDb, err := ethdb.NewLDBDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
-	//ethDb, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
-	ethDb, err := ethdb.NewLDBDatabase("/home/akhounov/.ethereum/geth/chaindata1")
+	ethDb, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	//ethDb, err := ethdb.NewLDBDatabase("/home/akhounov/.ethereum/geth/chaindata1")
 	check(err)
 	defer ethDb.Close()
 	chainConfig := params.MainnetChainConfig
 	//slFile, err := os.OpenFile("/Volumes/tb4/turbo-geth/stateless.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
-	slFile, err := os.OpenFile("stateless4.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	slFile, err := os.OpenFile("stateless.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	check(err)
 	defer slFile.Close()
 	w := bufio.NewWriter(slFile)
 	defer w.Flush()
+	slfFile, err := os.OpenFile("statelessfull.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	check(err)
+	defer slfFile.Close()
+	wf := bufio.NewWriter(slfFile)
+	defer wf.Flush()
 	vmConfig := vm.Config{}
 	engine := ethash.NewFullFaker()
 	bcb, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vm.Config{}, nil)
@@ -88,6 +93,7 @@ func stateless() {
 	tds.SetNoHistory(true)
 	interrupt := false
 	var thresholdBlock uint64 = 5300000
+	var prevStateless *state.Stateless
 	for !interrupt {
 		trace := false
 		if trace {
@@ -101,6 +107,9 @@ func stateless() {
 		}
 		tds.SetResolveReads(blockNum >= thresholdBlock)
 		block := bcb.GetBlockByNumber(blockNum)
+		if block == nil {
+			break
+		}
 		statedb := state.New(tds)
 		gp := new(core.GasPool).AddGas(block.GasLimit())
 		usedGas := new(uint64)
@@ -145,7 +154,7 @@ func stateless() {
 			panic(err)
 		}
 		if (blockNum % 500000 == 0) || (blockNum > 5600000 && blockNum % 100000 == 0) {
-			save_snapshot(db, fmt.Sprintf("state_%d", blockNum))
+			//save_snapshot(db, fmt.Sprintf("state_%d", blockNum))
 		}
 		if blockNum >= thresholdBlock {
 			contracts, cMasks, cHashes, cShortKeys, cValues, codes, masks, hashes, shortKeys, values := tds.ExtractProofs(trace)
@@ -157,6 +166,7 @@ func stateless() {
 			)
 			if err != nil {
 				fmt.Printf("Error making state for block %d: %v\n", blockNum, err)
+				prevStateless = nil
 			} else {
 				statedb := state.New(dbstate)
 				gp := new(core.GasPool).AddGas(block.GasLimit())
@@ -212,6 +222,12 @@ func stateless() {
 					blockNum, len(contracts), len(cMasks), len(cHashes), len(cShortKeys), len(cValues), len(codes),
 					len(masks), len(hashes), len(shortKeys), len(values), totalCShorts, totalCValues, totalCodes, totalShorts, totalValues,
 				)
+				if prevStateless != nil {
+					prevStateless.ThinProof(contracts, cMasks, cHashes, cShortKeys, cValues,
+					codes,
+					masks, hashes, shortKeys, values)
+				}
+				prevStateless = dbstate
 			}
 		}
 		preRoot = header.Root
@@ -231,6 +247,7 @@ func stateless() {
 	fmt.Printf("Next time specify -block %d\n", blockNum)
 	fmt.Printf("Stateless client analysis took %s\n", time.Since(startTime))
 }
+
 
 func stateless_chart_key_values(right []int, chartFileName string, start int, startColor int) {
 	file, err := os.Open("stateless2.csv")

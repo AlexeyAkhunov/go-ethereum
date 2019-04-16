@@ -1064,7 +1064,7 @@ func makeCreators() {
 func storageUsage() {
 	startTime := time.Now()
 	//db, err := bolt.Open("/home/akhounov/.ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	db, err := bolt.Open("/Volumes/tb41/turbo-geth-10/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
+	db, err := bolt.Open("/Volumes/tb4/turbo-geth-10/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
 	//db, err := bolt.Open("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
 	check(err)
 	defer db.Close()
@@ -1093,6 +1093,7 @@ func storageUsage() {
 	numDeleted := 0
 	//itemsByCreator := make(map[common.Address]int)
 	count := 0
+	var leafSize uint64
 	err = db.View(func(tx *bolt.Tx) error {
 		a := tx.Bucket(state.AccountsBucket)
 		b := tx.Bucket(state.StorageBucket)
@@ -1100,7 +1101,7 @@ func storageUsage() {
 			return nil
 		}
 		c := b.Cursor()
-		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+		for k, v := c.First(); k != nil; k, v = c.Next() {
 			copy(addr[:], k[:20])
 			del, ok := deleted[addr]
 			if !ok {
@@ -1115,6 +1116,7 @@ func storageUsage() {
 			}
 			itemsByAddress[addr]++
 			//itemsByCreator[creators[addr]]++
+			leafSize += uint64(len(v))
 			count++
 			if count%100000 == 0 {
 				fmt.Printf("Processed %d storage records, deleted contracts: %d\n", count, numDeleted)
@@ -1124,6 +1126,7 @@ func storageUsage() {
 	})
 	check(err)
 	fmt.Printf("Processing took %s\n", time.Since(startTime))
+	fmt.Printf("Average leaf size: %d/%d\n", leafSize, count)
 	iba := NewIntSorterAddr(len(itemsByAddress))
 	idx := 0
 	total := 0
@@ -1135,7 +1138,7 @@ func storageUsage() {
 	}
 	sort.Sort(iba)	
 	fmt.Printf("Writing dataset...\n")
-	f, err := os.Create("/Volumes/tb41/turbo-geth/items_by_address.csv")
+	f, err := os.Create("/Volumes/tb4/turbo-geth/items_by_address.csv")
 	check(err)
 	defer f.Close()
 	w := bufio.NewWriter(f)
