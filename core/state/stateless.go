@@ -30,11 +30,11 @@ import (
 type Stateless struct {
 	stateRoot common.Hash
 	contracts []common.Address
-	cMasks []uint32
+	cMasks []uint16
 	cHashes []common.Hash
 	cShortKeys [][]byte
 	cValues [][]byte
-	masks []uint32
+	masks []uint16
 	hashes []common.Hash
 	shortKeys [][]byte
 	values [][]byte
@@ -50,12 +50,12 @@ type Stateless struct {
 
 func NewStateless(stateRoot common.Hash,
 	contracts []common.Address,
-	cMasks []uint32,
+	cMasks []uint16,
 	cHashes []common.Hash,
 	cShortKeys [][]byte,
 	cValues [][]byte,
 	codes [][]byte,
-	masks []uint32,
+	masks []uint16,
 	hashes []common.Hash,
 	shortKeys [][]byte,
 	values [][]byte,
@@ -139,23 +139,23 @@ func NewStateless(stateRoot common.Hash,
 
 func (s *Stateless) ThinProof(
 	contracts []common.Address,
-	cMasks []uint32,
+	cMasks []uint16,
 	cHashes []common.Hash,
 	cShortKeys [][]byte,
 	cValues [][]byte,
 	codes [][]byte,
-	masks []uint32,
+	masks []uint16,
 	hashes []common.Hash,
 	shortKeys [][]byte,
 	values [][]byte,
 ) (
 	aContracts []common.Address,
-	acMasks []uint32,
+	acMasks []uint16,
 	acHashes []common.Hash,
 	acShortKeys [][]byte,
 	acValues [][]byte,
 	acodes [][]byte,
-	aMasks []uint32,
+	aMasks []uint16,
 	aHashes []common.Hash,
 	aShortKeys [][]byte,
 	aValues [][]byte,
@@ -178,10 +178,18 @@ func (s *Stateless) ThinProof(
 		if st, ok = s.storageTries[addrHash]; !ok {
 			st, mIdx, hIdx, sIdx, vIdx = trie.NewFromProofs(StorageBucket, nil, true, cMasks[maskIdx:], cShortKeys[shortIdx:], cValues[valueIdx:], cHashes[hashIdx:], s.trace)
 			s.storageTries[addrHash] = st
-			acMasks = append(acMasks, cMasks[maskIdx:mIdx]...)
-			acShortKeys = append(acShortKeys, cShortKeys[shortIdx:sIdx]...)
-			acValues = append(acValues, cValues[valueIdx:vIdx]...)
-			acHashes = append(acHashes, cHashes[hashIdx:hIdx]...)
+			if mIdx > maskIdx {
+				acMasks = append(acMasks, cMasks[maskIdx:mIdx]...)
+			}
+			if sIdx > shortIdx {
+				acShortKeys = append(acShortKeys, cShortKeys[shortIdx:sIdx]...)
+			}
+			if vIdx > valueIdx {
+				acValues = append(acValues, cValues[valueIdx:vIdx]...)
+			}
+			if hIdx > hashIdx {
+				acHashes = append(acHashes, cHashes[hashIdx:hIdx]...)
+			}
 		} else {
 			mIdx, hIdx, sIdx, vIdx, acMasks, acShortKeys, acValues, acHashes = st.AmmendProofs(
 				cMasks[maskIdx:], cShortKeys[shortIdx:], cValues[valueIdx:], cHashes[hashIdx:],

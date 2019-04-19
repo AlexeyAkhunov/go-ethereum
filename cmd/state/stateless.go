@@ -92,7 +92,7 @@ func stateless() {
 	tds.SetResolveReads(false)
 	tds.SetNoHistory(true)
 	interrupt := false
-	var thresholdBlock uint64 = 5300000
+	var thresholdBlock uint64 = 0
 	var prevStateless *state.Stateless
 	for !interrupt {
 		trace := false
@@ -146,6 +146,7 @@ func stateless() {
 		if nextRoot != block.Root() {
 			fmt.Printf("Root hash does not match for block %d, expected %x, was %x\n", blockNum, block.Root(), nextRoot)
 		}
+		tds.SetBlockNr(blockNum)
 		err = statedb.Commit(chainConfig.IsEIP158(header.Number), tds.DbStateWriter())
 		if err != nil {
 			panic(fmt.Errorf("Commiting block %d failed: %v", blockNum, err))

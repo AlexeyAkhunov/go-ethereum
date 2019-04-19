@@ -263,7 +263,7 @@ func (tds *TrieDbState) TrieRoot() (common.Hash, error) {
 }
 
 func (tds *TrieDbState) extractProofs(prefix []byte, trace bool) (
-	masks []uint32, hashes []common.Hash, shortKeys [][]byte, values [][]byte,
+	masks []uint16, hashes []common.Hash, shortKeys [][]byte, values [][]byte,
 ) {
 	if trace {
 		fmt.Printf("Extracting proofs for prefix %x\n", prefix)
@@ -358,33 +358,39 @@ func (tds *TrieDbState) extractProofs(prefix []byte, trace bool) (
 		if trace {
 			fmt.Printf("%x\n", key)
 		}
-		if mask, ok := proofMasks[key]; ok {
-			if trace {
-				fmt.Printf("Mask %16b\n", mask)
-			}
+		if hashmask, ok := proofMasks[key]; ok {
 			// Determine the downward mask
-			var downmask uint32
+			var fullnodemask uint16
+			var shortnodemask uint16
 			for nibble := byte(0); nibble < 16; nibble++ {
-				if _, ok1 := keySet[key + string(nibble)]; ok1 {
-					downmask |= (uint32(1) << nibble)
+				if _, ok2 := proofShorts[key + string(nibble)]; ok2 {
+					shortnodemask |= (uint16(1) << nibble)
+				}
+				if _, ok3 := proofMasks[key + string(nibble)]; ok3 {
+					fullnodemask |= (uint16(1) << nibble)
 				}
 			}
 			h := proofHashes[key]
 			for i := byte(0); i < 16; i++ {
-				if (mask &^ downmask & (uint32(1) << i)) != 0 {
+				if (hashmask & (uint32(1) << i)) != 0 {
 					hashes = append(hashes, h[i])
 				}
 			}
 			if trace {
-				fmt.Printf("Down %16b\n", downmask)
+				fmt.Printf("%x: hash %16b, full %16b, short %16b\n", key, hashmask, fullnodemask, shortnodemask)
 			}
-			masks = append(masks, mask | downmask | (downmask << 16))
-		}
+			if len(masks) == 0 {
+				masks = append(masks, 0)
+			}
+			masks = append(masks, uint16(hashmask)) // Hash mask
+			masks = append(masks, uint16(fullnodemask)) // Fullnode mask
+			masks = append(masks, uint16(shortnodemask)) // Short node mask
+ 		}
 		if short, ok := proofShorts[key]; ok {
 			if trace {
 				fmt.Printf("Short %x: %x\n", []byte(key), short)
 			}
-			var downmask uint32
+			var downmask uint16
 			if _, ok2 := proofHashes[key + string(short)]; ok2 {
 				downmask = 1
 			} else if h, ok1 := soleHashes[key + string(short)]; ok1 {
@@ -396,7 +402,11 @@ func (tds *TrieDbState) extractProofs(prefix []byte, trace bool) (
 			if trace {
 				fmt.Printf("Down %16b\n", downmask)
 			}
-			masks = append(masks, (downmask << 16))
+			if len(masks) == 0 {
+				masks = append(masks, 1)
+			}
+			masks = append(masks, downmask)
+			//masks = append(masks, (downmask << 16))
 			shortKeys = append(shortKeys, short)
 		}
 		if value, ok := proofValues[key]; ok {
@@ -409,7 +419,7 @@ func (tds *TrieDbState) extractProofs(prefix []byte, trace bool) (
 	if trace {
 		fmt.Printf("Masks:")
 		for _, mask := range masks {
-			fmt.Printf(" %32b", mask)
+			fmt.Printf(" %16b", mask)
 		}
 		fmt.Printf("\n")
 		fmt.Printf("Shorts:")
@@ -436,9 +446,9 @@ func (tds *TrieDbState) extractProofs(prefix []byte, trace bool) (
 }
 
 func (tds *TrieDbState) ExtractProofs(trace bool) (
-	contracts []common.Address, cMasks []uint32, cHashes []common.Hash, cShortKeys [][]byte, cValues [][]byte,
+	contracts []common.Address, cMasks []uint16, cHashes []common.Hash, cShortKeys [][]byte, cValues [][]byte,
 	codes [][]byte,
-	masks []uint32, hashes []common.Hash, shortKeys [][]byte, values [][]byte,
+	masks []uint16, hashes []common.Hash, shortKeys [][]byte, values [][]byte,
 ) {
 	if trace {
 		fmt.Printf("Extracting proofs for block %d\n", tds.blockNr)
