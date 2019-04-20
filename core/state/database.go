@@ -520,6 +520,18 @@ func (tds *TrieDbState) PrintStorageTrie(w io.Writer, addrHash common.Hash) {
 	storageTrie.Print(w)
 }
 
+type Hashes []common.Hash
+
+func (hashes Hashes) Len() int {
+	return len(hashes)
+}
+func (hashes Hashes) Less(i, j int) bool {
+	return bytes.Compare(hashes[i][:], hashes[j][:]) == -1
+}
+func (hashes Hashes) Swap(i, j int) {
+	hashes[i], hashes[j] = hashes[j], hashes[i]
+}
+
 func (tds *TrieDbState) trieRoot(forward bool) (common.Hash, error) {
 	if len(tds.storageUpdates) == 0 && len(tds.accountUpdates) == 0 {
 		return tds.t.Hash(), nil
@@ -543,49 +555,20 @@ func (tds *TrieDbState) trieRoot(forward bool) (common.Hash, error) {
 		if err != nil {
 			return common.Hash{}, err
 		}
-		for keyHash, v := range m {
+		hashes := make(Hashes, len(m))
+		i := 0
+		for keyHash, _ := range m {
+			hashes[i] = keyHash
+			i++
+		}
+		sort.Sort(hashes)
+		for _, keyHash := range hashes {
+			v := m[keyHash]
 			var c *trie.TrieContinuation
 			if len(v) > 0 {
 				c = storageTrie.UpdateAction(keyHash[:], v)
 				oldContinuations = append(oldContinuations, c)
-			}
-		}
-	}
-	for len(oldContinuations) > 0 {
-		var resolver *trie.TrieResolver
-		for _, c := range oldContinuations {
-			if !c.RunWithDb(tds.db, tds.blockNr) {
-				newContinuations = append(newContinuations, c)
-				if resolver == nil {
-					resolver = trie.NewResolver(tds.db, false, false)
-					resolver.SetHistorical(tds.historical)
-				}
-				resolver.AddContinuation(c)
-			}
-		}
-		if len(newContinuations) > 0 {
-			if err := resolver.ResolveWithDb(tds.db, tds.blockNr); err != nil {
-				return common.Hash{}, err
-			}
-			resolver = nil
-		}
-		oldContinuations, newContinuations = newContinuations, []*trie.TrieContinuation{}
-	}
-	for address, m := range tds.storageUpdates {
-		addrHash, err := tds.HashAddress(&address, false /*save*/)
-		if err != nil {
-			return common.Hash{}, nil
-		}
-		if _, ok := tds.deleted[addrHash]; ok {
-			continue
-		}
-		storageTrie, err := tds.getStorageTrie(address, addrHash, true)
-		if err != nil {
-			return common.Hash{}, err
-		}
-		for keyHash, v := range m {
-			var c *trie.TrieContinuation
-			if len(v) == 0 {
+			} else {
 				c = storageTrie.DeleteAction(keyHash[:])
 				oldContinuations = append(oldContinuations, c)
 			}
@@ -618,7 +601,15 @@ func (tds *TrieDbState) trieRoot(forward bool) (common.Hash, error) {
 	}
 	oldContinuations = []*trie.TrieContinuation{}
 	newContinuations = []*trie.TrieContinuation{}
-	for addrHash, account := range tds.accountUpdates {
+	addrs := make(Hashes, len(tds.accountUpdates))
+	i := 0
+	for addrHash, _ := range tds.accountUpdates {
+		addrs[i] = addrHash
+		i++
+	}
+	sort.Sort(addrs)
+	for _, addrHash := range addrs {
+		account := tds.accountUpdates[addrHash]
 		var c *trie.TrieContinuation
 		// first argument to getStorageTrie is not used unless the last one == true
 		storageTrie, err := tds.getStorageTrie(common.Address{}, addrHash, false)
@@ -640,43 +631,7 @@ func (tds *TrieDbState) trieRoot(forward bool) (common.Hash, error) {
 			}
 			c = tds.t.UpdateAction(addrHash[:], data)
 			oldContinuations = append(oldContinuations, c)
-		}
-		if deleteStorageTrie && storageTrie != nil {
-			delete(tds.storageTries, addrHash)
-			storageTrie.PrepareToRemove()
-		}
-	}
-	it = 0
-	for len(oldContinuations) > 0 {
-		var resolver *trie.TrieResolver
-		for _, c := range oldContinuations {
-			if !c.RunWithDb(tds.db, tds.blockNr) {
-				newContinuations = append(newContinuations, c)
-				if resolver == nil {
-					resolver = trie.NewResolver(tds.db, false, true)
-					resolver.SetHistorical(tds.historical)
-				}
-				resolver.AddContinuation(c)
-			}
-		}
-		if len(newContinuations) > 0 {
-			if err := resolver.ResolveWithDb(tds.db, tds.blockNr); err != nil {
-				return common.Hash{}, err
-			}
-			resolver = nil
-		}
-		oldContinuations, newContinuations = newContinuations, []*trie.TrieContinuation{}
-		it++
-	}
-	for addrHash, account := range tds.accountUpdates {
-		var c *trie.TrieContinuation
-		// first argument to getStorageTrie is not used unless the last one == true
-		storageTrie, err := tds.getStorageTrie(common.Address{}, addrHash, false)
-		if err != nil {
-			return common.Hash{}, err
-		}
-		deleteStorageTrie := false
-		if account == nil {
+		} else {
 			deleteStorageTrie = true
 			c = tds.t.DeleteAction(addrHash[:])
 			oldContinuations = append(oldContinuations, c)
@@ -1288,6 +1243,11 @@ func (tds *TrieDbState) ReadAccountCodeSize(codeHash common.Hash) (codeSize int,
 		if tds.resolveReads {
 			if cachedCode, ok := tds.codeCache.Get(codeHash); ok {
 				code, err = cachedCode.([]byte), nil
+			} else {
+				code, err = tds.ReadAccountCode(codeHash)
+				if err != nil {
+					return 0, err
+				}
 			}
 		}
 	} else {

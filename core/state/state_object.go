@@ -207,18 +207,6 @@ func (self *stateObject) setState(key, value common.Hash) {
 	self.dirtyStorage[key] = value
 }
 
-type Hashes []common.Hash
-
-func (a *Hashes) Len() int {
-	return len(*a)
-}
-func (a *Hashes) Less(i, j int) bool {
-	return bytes.Compare((*a)[i][:], (*a)[j][:]) == -1
-}
-func (a *Hashes) Swap(i, j int) {
-	(*a)[i], (*a)[j] = (*a)[j], (*a)[i]
-}
-
 // updateTrie writes cached storage modifications into the object's storage trie.
 func (self *stateObject) updateTrie(stateWriter StateWriter) error {
 	for key, value := range self.dirtyStorage {
