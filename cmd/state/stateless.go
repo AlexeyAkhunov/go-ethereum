@@ -95,7 +95,7 @@ func stateless() {
 	var thresholdBlock uint64 = 0
 	var prevStateless *state.Stateless
 	for !interrupt {
-		trace := false
+		trace := blockNum == 51385 || blockNum == 51384
 		if trace {
 			filename := fmt.Sprintf("right_%d.txt", blockNum)
 			f, err1 := os.Create(filename)
@@ -170,6 +170,7 @@ func stateless() {
 				prevStateless = nil
 			} else {
 				statedb := state.New(dbstate)
+				statedb.SetTrace(trace)
 				gp := new(core.GasPool).AddGas(block.GasLimit())
 				usedGas := new(uint64)
 				var receipts types.Receipts
@@ -224,16 +225,85 @@ func stateless() {
 					len(masks), len(hashes), len(shortKeys), len(values), totalCShorts, totalCValues, totalCodes, totalShorts, totalValues,
 				)
 				if prevStateless != nil {
-					prevStateless.ThinProof(contracts, cMasks, cHashes, cShortKeys, cValues,
+					aContracts, acMasks, acHashes, acShortKeys, acValues,
+					aCodes, aMasks, aHashes, aShortKeys, aValues := prevStateless.ThinProof(contracts, cMasks, cHashes, cShortKeys, cValues,
 					codes,
-					masks, hashes, shortKeys, values)
+					masks, hashes, shortKeys, values, trace)
+					if trace {
+						fmt.Printf("THIN PROOF:\n")
+						fmt.Printf("Masks:")
+						for _, mask := range aMasks {
+							fmt.Printf(" %16b", mask)
+						}
+						fmt.Printf("\n")
+						fmt.Printf("Shorts:")
+						for _, short := range aShortKeys {
+							fmt.Printf(" %x", short)
+						}
+						fmt.Printf("\n")
+						fmt.Printf("Hashes:")
+						for _, hash := range aHashes {
+							fmt.Printf(" %x", hash[:4])
+						}
+						fmt.Printf("\n")
+						fmt.Printf("Values:")
+						for _, value := range aValues {
+							if value == nil {
+								fmt.Printf(" nil")
+							} else {
+								fmt.Printf(" %x", value)
+							}
+						}
+						fmt.Printf("\n")
+					}
+					err = prevStateless.ApplyThinProof(preRoot, aContracts, acMasks, acHashes, acShortKeys, acValues,
+						aCodes, aMasks, aHashes, aShortKeys, aValues, block.NumberU64()-1, trace)
+					if err != nil {
+						panic(err)
+					}
+
+					statedb := state.New(prevStateless)
+					statedb.SetTrace(trace)
+					gp := new(core.GasPool).AddGas(block.GasLimit())
+					usedGas := new(uint64)
+					var receipts types.Receipts
+					if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
+						misc.ApplyDAOHardFork(statedb)
+					}
+					for _, tx := range block.Transactions() {
+						receipt, _, err := core.ApplyTransaction(chainConfig, bcb, nil, gp, statedb, prevStateless, header, tx, usedGas, vmConfig)
+						if err != nil {
+							panic(fmt.Errorf("[THIN] tx %x failed: %v", tx.Hash(), err))
+						}
+						receipts = append(receipts, receipt)
+					}
+					// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
+					_, err = engine.Finalize(chainConfig, header, statedb, block.Transactions(), block.Uncles(), receipts)
+					if err != nil {
+						panic(fmt.Errorf("[THIN] Finalize of block %d failed: %v", blockNum, err))
+					}
+					prevStateless.SetBlockNr(blockNum+1)
+					err = statedb.Commit(chainConfig.IsEIP158(header.Number), prevStateless)
+					if err != nil {
+						panic(fmt.Errorf("[THIN] Commiting block %d failed: %v", blockNum, err))
+					}
+					err = prevStateless.CheckRoot(header.Root)
+					if err != nil {
+						filename := fmt.Sprintf("right_%d.txt", blockNum+1)
+						f, err1 := os.Create(filename)
+						if err1 == nil {
+							defer f.Close()
+							tds.PrintTrie(f)
+						}
+						fmt.Printf("[THIN] Error processing block %d: %v\n", blockNum, err)
+					}
 				}
 				prevStateless = dbstate
 			}
 		}
 		preRoot = header.Root
 		blockNum++
-		if blockNum % 1000 == 0 {
+		if blockNum > 51000 || blockNum % 1000 == 0 {
 			//tds.PruneTries(true)
 			fmt.Printf("Processed %d blocks\n", blockNum)
 		}

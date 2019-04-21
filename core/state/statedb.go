@@ -89,6 +89,7 @@ type StateDB struct {
 	validRevisions []revision
 	nextRevisionId int
 	tracer vm.Tracer
+	trace bool
 }
 
 // Create a new state from a given trie
@@ -106,6 +107,10 @@ func New(stateReader StateReader) *StateDB {
 
 func (self *StateDB) SetTracer(tracer vm.Tracer) {
 	self.tracer = tracer
+}
+
+func (self *StateDB) SetTrace(trace bool) {
+	self.trace = trace
 }
 
 // setError remembers the first non-nil error it is called with.
@@ -238,7 +243,13 @@ func (self *StateDB) GetCode(addr common.Address) []byte {
 	}
 	stateObject := self.getStateObject(addr)
 	if stateObject != nil {
+		if self.trace {
+			fmt.Printf("GetCode %x, returned %d\n", addr, len(stateObject.Code()))
+		}
 		return stateObject.Code()
+	}
+	if self.trace {
+		fmt.Printf("GetCode %x, returned nil\n", addr)
 	}
 	return nil
 }
@@ -324,6 +335,9 @@ func (self *StateDB) HasSuicided(addr common.Address) bool {
 
 // AddBalance adds amount to the account associated with addr.
 func (self *StateDB) AddBalance(addr common.Address, amount *big.Int) {
+	if self.trace {
+		fmt.Printf("AddBalance %x, %d\n", addr, amount)
+	}
 	if self.tracer != nil {
 		self.tracer.CaptureAccountWrite(addr)
 	}
@@ -335,6 +349,9 @@ func (self *StateDB) AddBalance(addr common.Address, amount *big.Int) {
 
 // SubBalance subtracts amount from the account associated with addr.
 func (self *StateDB) SubBalance(addr common.Address, amount *big.Int) {
+	if self.trace {
+		fmt.Printf("SubBalance %x, %d\n", addr, amount)
+	}
 	if self.tracer != nil {
 		self.tracer.CaptureAccountWrite(addr)
 	}
