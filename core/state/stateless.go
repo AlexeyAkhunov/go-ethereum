@@ -382,6 +382,9 @@ func (s *Stateless) CheckRoot(expected common.Hash) error {
 		h.sha.Write(address[:])
 		var addrHash common.Hash
 		h.sha.Read(addrHash[:])
+		if _, ok := s.deleted[addrHash]; ok {
+			continue
+		}
 		t, err := s.getStorageTrie(address, addrHash, true)
 		if err != nil {
 			return err
