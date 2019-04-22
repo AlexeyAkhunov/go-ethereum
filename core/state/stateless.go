@@ -488,10 +488,6 @@ func (s *Stateless) WriteAccountStorage(address common.Address, key, original, v
 		m = make(map[common.Hash][]byte)
 		s.storageUpdates[address] = m
 	}
-	//fmt.Printf("WriteAccountStorage\n")
-	//if *original == *value {
-	//	return nil
-	//}
 	h := newHasher()
 	defer returnHasherToPool(h)
 	h.sha.Reset()

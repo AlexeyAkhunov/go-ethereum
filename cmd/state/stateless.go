@@ -125,11 +125,11 @@ func stateless() {
 				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
 			}
 			if !chainConfig.IsByzantium(header.Number) {
-				rootHash, err := tds.TrieRoot()
-				if err != nil {
-					panic(fmt.Errorf("tx %d, %x failed: %v", i, tx.Hash(), err))
-				}
-				receipt.PostState = rootHash.Bytes()
+				//rootHash, err := tds.TrieRoot()
+				//if err != nil {
+				//	panic(fmt.Errorf("tx %d, %x failed: %v", i, tx.Hash(), err))
+				//}
+				//receipt.PostState = rootHash.Bytes()
 			}
 			receipts = append(receipts, receipt)
 		}
