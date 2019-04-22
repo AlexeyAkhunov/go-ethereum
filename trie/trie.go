@@ -279,8 +279,7 @@ func ammendFullNode(n node,
 	aValues [][]byte,
 	aHashes []common.Hash,
 	trace bool,
-) ([]uint16, [][]byte, [][]byte, []common.Hash, bool) {
-	aAnything := false
+) ([]uint16, [][]byte, [][]byte, []common.Hash) {
 	hashmask := masks[*maskIdx]
 	(*maskIdx)++
 	fullnodemask := masks[*maskIdx]
@@ -314,7 +313,6 @@ func ammendFullNode(n node,
 			if !ok {
 				aHashes = append(aHashes, hash)
 				aHashmask |= (uint16(1)<<nibble)
-				aAnything = true
 			}
 		} else {
 			if trace {
@@ -330,43 +328,31 @@ func ammendFullNode(n node,
 		if ok {
 			child = f.Children[nibble]
 		}
-		var anything bool
 		if (fullnodemask & (uint16(1)<<nibble)) != 0 {
 			if trace {
 				fmt.Printf("%sIn the loop at pos: %d, hashes: %16b, fullnodes: %16b, shortnodes: %16b, nibble %x, fchild %T\n",
 					strings.Repeat(" ", pos), pos, hashmask, fullnodemask, shortnodemask, nibble, child)
 			}
-			aMasks, aShortKeys, aValues, aHashes, anything = ammendFullNode(child, pos+1, masks, shortKeys, values, hashes,
+			aMasks, aShortKeys, aValues, aHashes = ammendFullNode(child, pos+1, masks, shortKeys, values, hashes,
 				maskIdx, shortIdx, valueIdx, hashIdx,
 				aMasks, aShortKeys, aValues, aHashes, trace)
-			if anything {
-				aFullnodemask |= (uint16(1)<<nibble)
-			}
+			aFullnodemask |= (uint16(1)<<nibble)
 		} else if (shortnodemask & (uint16(1)<<nibble)) != 0 {
 			if trace {
 				fmt.Printf("%sIn the loop at pos: %d, hashes: %16b, fullnodes: %16b, shortnodes: %16b, nibble %x, schild %T\n",
 					strings.Repeat(" ", pos), pos, hashmask, fullnodemask, shortnodemask, nibble, child)
 			}
-			aMasks, aShortKeys, aValues, aHashes, anything = ammendShortNode(child, pos+1, masks, shortKeys, values, hashes,
+			aMasks, aShortKeys, aValues, aHashes = ammendShortNode(child, pos+1, masks, shortKeys, values, hashes,
 				maskIdx, shortIdx, valueIdx, hashIdx,
 				aMasks, aShortKeys, aValues, aHashes, trace)
-			if anything {
-				aShortnodemask |= (uint16(1)<<nibble)
-			}
-		}
-		if anything {
-			aAnything = true
+			aShortnodemask |= (uint16(1)<<nibble)
 		}
 	}
-	if aAnything {
-		aMasks[aHashMaxIdx] = aHashmask
-		aMasks[aFullnodemaskIdx] = aFullnodemask
-		aMasks[aShortnodemaskIdx] = aShortnodemask
-	} else {
-		aMasks = aMasks[:len(aMasks)-3]
-	}
+	aMasks[aHashMaxIdx] = aHashmask
+	aMasks[aFullnodemaskIdx] = aFullnodemask
+	aMasks[aShortnodemaskIdx] = aShortnodemask
 
-	return aMasks, aShortKeys, aValues, aHashes, aAnything
+	return aMasks, aShortKeys, aValues, aHashes
 }
 
 func ammendShortNode(n node,
@@ -381,8 +367,7 @@ func ammendShortNode(n node,
 	aValues [][]byte,
 	aHashes []common.Hash,
 	trace bool,
-) ([]uint16, [][]byte, [][]byte, []common.Hash, bool) {
-	aAnything := false
+) ([]uint16, [][]byte, [][]byte, []common.Hash) {
 	downmask := masks[*maskIdx]
 	(*maskIdx)++
 	if trace {
@@ -399,10 +384,11 @@ func ammendShortNode(n node,
 		value := values[*valueIdx]
 		(*valueIdx)++
 		if !ok {
-			aMasks = append(aMasks, 0)
+			aMasks = append(aMasks, 2)
 			aShortKeys = append(aShortKeys, nKey)
 			aValues = append(aValues, value)
-			aAnything = true
+		} else {
+			aMasks = append(aMasks, 3)
 		}
 	} else {
 		if trace {
@@ -415,34 +401,29 @@ func ammendShortNode(n node,
 			hash := hashes[*hashIdx]
 			(*hashIdx)++
 			if !ok {
-				aMasks = append(aMasks, 0)
+				aMasks = append(aMasks, 4)
 				aShortKeys = append(aShortKeys, nKey)
 				aHashes = append(aHashes, hash)
-				aAnything = true
+			} else {
+				aMasks = append(aMasks, 5)
 			}
 		} else {
 			var val node
-			aMasks = append(aMasks, 1)
-			aShortKeys = append(aShortKeys, nKey)
-			if ok {
+			if !ok {
+				aMasks = append(aMasks, 6)
+				aShortKeys = append(aShortKeys, nKey)
+			} else {
 				val = s.Val
+				aMasks = append(aMasks, 7)
 			}
-			var anything bool
-			aMasks, aShortKeys, aValues, aHashes, anything = ammendFullNode(
+			aMasks, aShortKeys, aValues, aHashes = ammendFullNode(
 				val, pos+len(nKey), masks, shortKeys, values, hashes,
 				maskIdx, shortIdx, valueIdx, hashIdx,
 				aMasks, aShortKeys, aValues, aHashes,
 				trace)
-			if ok && !anything {
-				// Rewind masks and the short keys
-				aMasks = aMasks[:len(aMasks)-1]
-				aShortKeys = aShortKeys[:len(aShortKeys)-1]
-			} else {
-				aAnything = true
-			}
 		}
 	}
-	return aMasks, aShortKeys, aValues, aHashes, aAnything
+	return aMasks, aShortKeys, aValues, aHashes
 }
 
 func (t *Trie) AmmendProofs(
@@ -455,7 +436,7 @@ func (t *Trie) AmmendProofs(
 	aValues [][]byte,
 	aHashes []common.Hash,
 	trace bool,
-) (mIdx, hIdx, sIdx, vIdx int, aMasks_ []uint16, aShortKeys_ [][]byte, aValues_ [][]byte, aHashes_ []common.Hash, anything bool) {
+) (mIdx, hIdx, sIdx, vIdx int, aMasks_ []uint16, aShortKeys_ [][]byte, aValues_ [][]byte, aHashes_ []common.Hash) {
 	var maskIdx int
 	var hashIdx int // index in the hashes
 	var shortIdx int // index in the shortKeys
@@ -464,18 +445,15 @@ func (t *Trie) AmmendProofs(
 	maskIdx = 1
 	aMasks = append(aMasks, firstMask)
 	if firstMask == 0 {
-		aMasks_, aShortKeys_, aValues_, aHashes_, anything = ammendFullNode(t.root, 0, masks, shortKeys, values, hashes,
+		aMasks_, aShortKeys_, aValues_, aHashes_ = ammendFullNode(t.root, 0, masks, shortKeys, values, hashes,
 			&maskIdx, &shortIdx, &valueIdx, &hashIdx,
 			aMasks, aShortKeys, aValues, aHashes, trace)
 	} else {
-		aMasks_, aShortKeys_, aValues_, aHashes_, anything = ammendShortNode(t.root, 0, masks, shortKeys, values, hashes,
+		aMasks_, aShortKeys_, aValues_, aHashes_ = ammendShortNode(t.root, 0, masks, shortKeys, values, hashes,
 			&maskIdx, &shortIdx, &valueIdx, &hashIdx,
 			aMasks, aShortKeys, aValues, aHashes, trace)
 	}
-	if !anything {
-		aMasks_ = aMasks_[:len(aMasks_)-1]
-	}
-	return maskIdx, hashIdx, shortIdx, valueIdx, aMasks_, aShortKeys_, aValues_, aHashes_, anything
+	return maskIdx, hashIdx, shortIdx, valueIdx, aMasks_, aShortKeys_, aValues_, aHashes_
 }
 
 func applyFullNode(n node,
@@ -567,10 +545,11 @@ func applyShortNode(n node,
 		fmt.Printf("%spos: %d, down: %16b", strings.Repeat(" ", pos), pos, downmask)
 	}
 	// short node (leaf or extension)
-	nKey := shortKeys[*shortIdx]
-	(*shortIdx)++
 	s, ok := n.(*shortNode)
-	if !ok {
+	var nKey []byte
+	if downmask == 2 || downmask == 4 || downmask == 6 {
+		nKey := shortKeys[*shortIdx]
+		(*shortIdx)++
 		s = &shortNode{Key: hexToCompact(nKey)}
 		s.flags.dirty = true
 	}
@@ -580,34 +559,29 @@ func applyShortNode(n node,
 			fmt.Printf("keep existing short node %x\n", compactToHex(s.Key))
 		}
 	}
-	if pos + len(nKey) == 65 {
+	switch downmask {
+	case 2:
 		value := values[*valueIdx]
 		(*valueIdx)++
-		if !ok {
-			s.Val = valueNode(value)
-		}
-	} else {
+		s.Val = valueNode(value)
+	case 3:
+	case 4:
 		if trace {
 			fmt.Printf("%spos = %d, len(nKey) = %d, nKey = %x\n", strings.Repeat(" ", pos), pos, len(nKey), nKey)
 		}
-		if downmask == 0 {
-			if trace {
-				fmt.Printf("%shash: %x\n", strings.Repeat(" ", pos), hashes[*hashIdx][:2])
-			}
-			hash := hashes[*hashIdx]
-			(*hashIdx)++
-			if !ok {
-				s.Val = hashNode(hash[:])
-			}
-		} else {
-			var val node
-			if ok {
-				val = s.Val
-			}
-			fn := applyFullNode(val, pos+len(nKey), masks, shortKeys, values, hashes,
-				maskIdx, shortIdx, valueIdx, hashIdx, trace)
-			s.Val = fn
+		hash := hashes[*hashIdx]
+		(*hashIdx)++
+		s.Val = hashNode(hash[:])
+	case 5:
+		if trace {
+			fmt.Printf("%spos = %d, len(nKey) = %d, nKey = %x\n", strings.Repeat(" ", pos), pos, len(nKey), nKey)
 		}
+	case 6:
+		s.Val = applyFullNode(nil, pos+len(nKey), masks, shortKeys, values, hashes,
+			maskIdx, shortIdx, valueIdx, hashIdx, trace)
+	case 7:
+		s.Val = applyFullNode(s.Val, pos+len(nKey), masks, shortKeys, values, hashes,
+			maskIdx, shortIdx, valueIdx, hashIdx, trace)
 	}
 	return s
 }

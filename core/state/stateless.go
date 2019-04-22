@@ -152,10 +152,9 @@ func (s *Stateless) ThinProof(
 	if trace {
 		fmt.Printf("THIN\n")
 	}
-	_, _, _, _, aMasks, aShortKeys, aValues, aHashes, _ = s.t.AmmendProofs(masks, shortKeys, values, hashes, aMasks, aShortKeys, aValues, aHashes, trace)
+	_, _, _, _, aMasks, aShortKeys, aValues, aHashes = s.t.AmmendProofs(masks, shortKeys, values, hashes, aMasks, aShortKeys, aValues, aHashes, trace)
 	var maskIdx, hashIdx, shortIdx, valueIdx int
 	aContracts = []common.Address{}
-	var anything bool
 	for _, contract := range contracts {
 		if trace {
 			fmt.Printf("THIN TRIE %x ==============================================\n", contract)
@@ -183,13 +182,11 @@ func (s *Stateless) ThinProof(
 			}
 			aContracts = append(aContracts, contract)
 		} else {
-			mIdx, hIdx, sIdx, vIdx, acMasks, acShortKeys, acValues, acHashes, anything = st.AmmendProofs(
+			mIdx, hIdx, sIdx, vIdx, acMasks, acShortKeys, acValues, acHashes = st.AmmendProofs(
 				cMasks[maskIdx:], cShortKeys[shortIdx:], cValues[valueIdx:], cHashes[hashIdx:],
 				acMasks, acShortKeys, acValues, acHashes,
 				trace)
-			if anything {
-				aContracts = append(aContracts, contract)
-			}
+			aContracts = append(aContracts, contract)
 		}
 		maskIdx += mIdx
 		shortIdx += sIdx
@@ -418,6 +415,7 @@ func (s *Stateless) CheckRoot(expected common.Hash) error {
 	sort.Sort(addrs)
 	for _, addrHash := range addrs {
 		account := s.accountUpdates[addrHash]
+		deleteStorageTrie := false
 		if account != nil {
 			storageTrie, err := s.getStorageTrie(common.Address{}, addrHash, false)
 			if err != nil {
@@ -425,6 +423,7 @@ func (s *Stateless) CheckRoot(expected common.Hash) error {
 			}
 			if _, ok := s.deleted[addrHash]; ok {
 				account.Root = emptyRoot
+				deleteStorageTrie = true
 			} else if storageTrie != nil {
 				//fmt.Printf("Updating account.Root of %x with %x, emptyRoot: %x\n", address, storageTrie.Hash(), emptyRoot)
 				account.Root = storageTrie.Hash()
@@ -437,9 +436,13 @@ func (s *Stateless) CheckRoot(expected common.Hash) error {
 				return err
 			}
 		} else {
+			deleteStorageTrie = true
 			if err := s.t.TryDelete(nil, addrHash[:], s.blockNr-1); err != nil {
 				return err
 			}
+		}
+		if deleteStorageTrie {
+			delete(s.storageTries, addrHash)
 		}
 	}
 	myRoot := s.t.Hash()
