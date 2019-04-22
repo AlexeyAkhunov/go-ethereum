@@ -95,7 +95,7 @@ func stateless() {
 	var thresholdBlock uint64 = 0
 	var prevStateless *state.Stateless
 	for !interrupt {
-		trace := blockNum == 51385 || blockNum == 51384
+		trace := false
 		if trace {
 			filename := fmt.Sprintf("right_%d.txt", blockNum)
 			f, err1 := os.Create(filename)
@@ -303,7 +303,7 @@ func stateless() {
 		}
 		preRoot = header.Root
 		blockNum++
-		if blockNum > 51000 || blockNum % 1000 == 0 {
+		if blockNum % 1000 == 0 {
 			//tds.PruneTries(true)
 			fmt.Printf("Processed %d blocks\n", blockNum)
 		}

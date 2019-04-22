@@ -333,8 +333,8 @@ func ammendFullNode(n node,
 		var anything bool
 		if (fullnodemask & (uint16(1)<<nibble)) != 0 {
 			if trace {
-				fmt.Printf("%sIn the loop at pos: %d, hashes: %16b, fullnodes: %16b, shortnodes: %16b, nibble %x\n",
-					strings.Repeat(" ", pos), pos, hashmask, fullnodemask, shortnodemask, nibble)
+				fmt.Printf("%sIn the loop at pos: %d, hashes: %16b, fullnodes: %16b, shortnodes: %16b, nibble %x, fchild %T\n",
+					strings.Repeat(" ", pos), pos, hashmask, fullnodemask, shortnodemask, nibble, child)
 			}
 			aMasks, aShortKeys, aValues, aHashes, anything = ammendFullNode(child, pos+1, masks, shortKeys, values, hashes,
 				maskIdx, shortIdx, valueIdx, hashIdx,
@@ -344,8 +344,8 @@ func ammendFullNode(n node,
 			}
 		} else if (shortnodemask & (uint16(1)<<nibble)) != 0 {
 			if trace {
-				fmt.Printf("%sIn the loop at pos: %d, hashes: %16b, fullnodes: %16b, shortnodes: %16b, nibble %x\n",
-					strings.Repeat(" ", pos), pos, hashmask, fullnodemask, shortnodemask, nibble)
+				fmt.Printf("%sIn the loop at pos: %d, hashes: %16b, fullnodes: %16b, shortnodes: %16b, nibble %x, schild %T\n",
+					strings.Repeat(" ", pos), pos, hashmask, fullnodemask, shortnodemask, nibble, child)
 			}
 			aMasks, aShortKeys, aValues, aHashes, anything = ammendShortNode(child, pos+1, masks, shortKeys, values, hashes,
 				maskIdx, shortIdx, valueIdx, hashIdx,
@@ -471,6 +471,9 @@ func (t *Trie) AmmendProofs(
 		aMasks_, aShortKeys_, aValues_, aHashes_, anything = ammendShortNode(t.root, 0, masks, shortKeys, values, hashes,
 			&maskIdx, &shortIdx, &valueIdx, &hashIdx,
 			aMasks, aShortKeys, aValues, aHashes, trace)
+	}
+	if !anything {
+		aMasks_ = aMasks_[:len(aMasks_)-1]
 	}
 	return maskIdx, hashIdx, shortIdx, valueIdx, aMasks_, aShortKeys_, aValues_, aHashes_, anything
 }

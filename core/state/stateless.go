@@ -168,19 +168,18 @@ func (s *Stateless) ThinProof(
 		var ok bool
 		var mIdx, hIdx, sIdx, vIdx int
 		if st, ok = s.storageTries[addrHash]; !ok {
-			st, mIdx, hIdx, sIdx, vIdx = trie.NewFromProofs(StorageBucket, nil, true, cMasks[maskIdx:], cShortKeys[shortIdx:], cValues[valueIdx:], cHashes[hashIdx:], trace)
-			s.storageTries[addrHash] = st
-			if mIdx > maskIdx {
-				acMasks = append(acMasks, cMasks[maskIdx:mIdx]...)
+			_, mIdx, hIdx, sIdx, vIdx = trie.NewFromProofs(StorageBucket, nil, true, cMasks[maskIdx:], cShortKeys[shortIdx:], cValues[valueIdx:], cHashes[hashIdx:], trace)
+			if mIdx > 0 {
+				acMasks = append(acMasks, cMasks[maskIdx:maskIdx+mIdx]...)
 			}
-			if sIdx > shortIdx {
-				acShortKeys = append(acShortKeys, cShortKeys[shortIdx:sIdx]...)
+			if sIdx > 0 {
+				acShortKeys = append(acShortKeys, cShortKeys[shortIdx:shortIdx+sIdx]...)
 			}
-			if vIdx > valueIdx {
-				acValues = append(acValues, cValues[valueIdx:vIdx]...)
+			if vIdx > 0 {
+				acValues = append(acValues, cValues[valueIdx:valueIdx+vIdx]...)
 			}
-			if hIdx > hashIdx {
-				acHashes = append(acHashes, cHashes[hashIdx:hIdx]...)
+			if hIdx > 0 {
+				acHashes = append(acHashes, cHashes[hashIdx:hashIdx+hIdx]...)
 			}
 			aContracts = append(aContracts, contract)
 		} else {
@@ -226,15 +225,17 @@ func (s *Stateless) ApplyThinProof(stateRoot common.Hash,
 ) error {
 	h := newHasher()
 	defer returnHasherToPool(h)
-	s.t.ApplyProofs(masks, shortKeys, values, hashes, trace)
-	if stateRoot != s.t.Hash() {
-		filename := fmt.Sprintf("root_%d.txt", blockNr)
-		f, err := os.Create(filename)
-		if err == nil {
-			defer f.Close()
-			s.t.Print(f)
+	if len(masks) > 0 {
+		s.t.ApplyProofs(masks, shortKeys, values, hashes, trace)
+		if stateRoot != s.t.Hash() {
+			filename := fmt.Sprintf("root_%d.txt", blockNr)
+			f, err := os.Create(filename)
+			if err == nil {
+				defer f.Close()
+				s.t.Print(f)
+			}
+			return fmt.Errorf("[THIN] Expected root: %x, Constructed root: %x", stateRoot, s.t.Hash())
 		}
-		return fmt.Errorf("[THIN] Expected root: %x, Constructed root: %x", stateRoot, s.t.Hash())
 	}
 	var maskIdx, hashIdx, shortIdx, valueIdx int
 	for _, contract := range contracts {
