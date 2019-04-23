@@ -206,7 +206,12 @@ func stateless() {
 				}
 				var totalCShorts, totalCValues, totalCodes, totalShorts, totalValues int
 				for _, short := range cShortKeys {
-					totalCShorts += len(short)
+					l := len(short)
+					if short[l-1] == 16 {
+						l -= 1
+					}
+					l = l/2 + 1
+					totalCShorts += l
 				}
 				for _, value := range cValues {
 					totalCValues += len(value)
@@ -215,7 +220,12 @@ func stateless() {
 					totalCodes += len(code)
 				}
 				for _, short := range shortKeys {
-					totalShorts += len(short)
+					l := len(short)
+					if short[l-1] == 16 {
+						l -= 1
+					}
+					l = l/2 + 1
+					totalShorts += l
 				}
 				for _, value := range values {
 					totalValues += len(value)
@@ -297,6 +307,36 @@ func stateless() {
 						}
 						fmt.Printf("[THIN] Error processing block %d: %v\n", blockNum, err)
 					}
+					var aTotalCShorts, aTotalCValues, aTotalCodes, aTotalShorts, aTotalValues int
+					for _, short := range acShortKeys {
+						l := len(short)
+						if short[l-1] == 16 {
+							l -= 1
+						}
+						l = l/2 + 1
+						aTotalCShorts += l
+					}
+					for _, value := range acValues {
+						aTotalCValues += len(value)
+					}
+					for _, code := range aCodes {
+						aTotalCodes += len(code)
+					}
+					for _, short := range aShortKeys {
+						l := len(short)
+						if short[l-1] == 16 {
+							l -= 1
+						}
+						l = l/2 + 1
+						aTotalShorts += l
+					}
+					for _, value := range aValues {
+						aTotalValues += len(value)
+					}
+					fmt.Fprintf(wf, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
+						blockNum, len(aContracts), len(acMasks), len(acHashes), len(acShortKeys), len(acValues), len(aCodes),
+						len(aMasks), len(aHashes), len(aShortKeys), len(aValues), aTotalCShorts, aTotalCValues, aTotalCodes, aTotalShorts, aTotalValues,
+					)
 				}
 				prevStateless = dbstate
 			}
