@@ -27,6 +27,19 @@ import (
 	"github.com/ethereum/go-ethereum/trie"
 )
 
+type BlockProof struct {
+	Contracts []common.Address
+	CMasks []uint16
+	CHashes []common.Hash
+	CShortKeys [][]byte
+	CValues [][]byte
+	Codes [][]byte
+	Masks []uint16
+	Hashes []common.Hash
+	ShortKeys [][]byte
+	Values [][]byte	
+}
+
 /* Proof Of Concept for verification of Stateless client proofs */
 type Stateless struct {
 	blockNr uint64
@@ -40,16 +53,7 @@ type Stateless struct {
 }
 
 func NewStateless(stateRoot common.Hash,
-	contracts []common.Address,
-	cMasks []uint16,
-	cHashes []common.Hash,
-	cShortKeys [][]byte,
-	cValues [][]byte,
-	codes [][]byte,
-	masks []uint16,
-	hashes []common.Hash,
-	shortKeys [][]byte,
-	values [][]byte,
+	blockProof BlockProof,
 	blockNr uint64,
 	trace bool,
 ) (*Stateless, error) {
@@ -58,7 +62,7 @@ func NewStateless(stateRoot common.Hash,
 	if trace {
 		fmt.Printf("ACCOUNT TRIE ==============================================\n")
 	}
-	t, _, _, _, _ := trie.NewFromProofs(AccountsBucket, nil, false, masks, shortKeys, values, hashes, trace)
+	t, _, _, _, _ := trie.NewFromProofs(AccountsBucket, nil, false, blockProof.Masks, blockProof.ShortKeys, blockProof.Values, blockProof.Hashes, trace)
 	if stateRoot != t.Hash() {
 		filename := fmt.Sprintf("root_%d.txt", blockNr)
 		f, err := os.Create(filename)
@@ -70,11 +74,12 @@ func NewStateless(stateRoot common.Hash,
 	}
 	storageTries := make(map[common.Hash]*trie.Trie)
 	var maskIdx, hashIdx, shortIdx, valueIdx int
-	for _, contract := range contracts {
+	for _, contract := range blockProof.Contracts {
 		if trace {
 			fmt.Printf("TRIE %x ==============================================\n", contract)
 		}
-		st, mIdx, hIdx, sIdx, vIdx := trie.NewFromProofs(StorageBucket, nil, true, cMasks[maskIdx:], cShortKeys[shortIdx:], cValues[valueIdx:], cHashes[hashIdx:], trace)
+		st, mIdx, hIdx, sIdx, vIdx := trie.NewFromProofs(StorageBucket, nil, true,
+			blockProof.CMasks[maskIdx:], blockProof.CShortKeys[shortIdx:], blockProof.CValues[valueIdx:], blockProof.CHashes[hashIdx:], trace)
 		h.sha.Reset()
 		h.sha.Write(contract[:])
 		var addrHash common.Hash
@@ -105,7 +110,7 @@ func NewStateless(stateRoot common.Hash,
 	codeMap := make(map[common.Hash][]byte)
 	codeMap[common.BytesToHash(emptyCodeHash)] = []byte{}
 	var codeHash common.Hash
-	for _, code := range codes {
+	for _, code := range blockProof.Codes {
 		h.sha.Reset()
 		h.sha.Write(code)
 		h.sha.Read(codeHash[:])
@@ -123,39 +128,21 @@ func NewStateless(stateRoot common.Hash,
 	}, nil
 }
 
-func (s *Stateless) ThinProof(
-	contracts []common.Address,
-	cMasks []uint16,
-	cHashes []common.Hash,
-	cShortKeys [][]byte,
-	cValues [][]byte,
-	codes [][]byte,
-	masks []uint16,
-	hashes []common.Hash,
-	shortKeys [][]byte,
-	values [][]byte,
-	trace bool,
-) (
-	aContracts []common.Address,
-	acMasks []uint16,
-	acHashes []common.Hash,
-	acShortKeys [][]byte,
-	acValues [][]byte,
-	aCodes [][]byte,
-	aMasks []uint16,
-	aHashes []common.Hash,
-	aShortKeys [][]byte,
-	aValues [][]byte,
-) {
+func (s *Stateless) ThinProof(blockProof BlockProof, trace bool) BlockProof {
 	h := newHasher()
 	defer returnHasherToPool(h)
 	if trace {
 		fmt.Printf("THIN\n")
 	}
-	_, _, _, _, aMasks, aShortKeys, aValues, aHashes = s.t.AmmendProofs(masks, shortKeys, values, hashes, aMasks, aShortKeys, aValues, aHashes, trace)
+	var aMasks, acMasks []uint16
+	var aShortKeys, acShortKeys [][]byte
+	var aValues,acValues [][]byte
+	var aHashes, acHashes []common.Hash
+	_, _, _, _, aMasks, aShortKeys, aValues, aHashes = s.t.AmmendProofs(blockProof.Masks, blockProof.ShortKeys, blockProof.Values, blockProof.Hashes,
+		aMasks, aShortKeys, aValues, aHashes, trace)
 	var maskIdx, hashIdx, shortIdx, valueIdx int
-	aContracts = []common.Address{}
-	for _, contract := range contracts {
+	aContracts := []common.Address{}
+	for _, contract := range blockProof.Contracts {
 		if trace {
 			fmt.Printf("THIN TRIE %x ==============================================\n", contract)
 		}
@@ -167,23 +154,24 @@ func (s *Stateless) ThinProof(
 		var ok bool
 		var mIdx, hIdx, sIdx, vIdx int
 		if st, ok = s.storageTries[addrHash]; !ok {
-			_, mIdx, hIdx, sIdx, vIdx = trie.NewFromProofs(StorageBucket, nil, true, cMasks[maskIdx:], cShortKeys[shortIdx:], cValues[valueIdx:], cHashes[hashIdx:], trace)
+			_, mIdx, hIdx, sIdx, vIdx = trie.NewFromProofs(StorageBucket, nil, true,
+				blockProof.CMasks[maskIdx:], blockProof.CShortKeys[shortIdx:], blockProof.CValues[valueIdx:], blockProof.CHashes[hashIdx:], trace)
 			if mIdx > 0 {
-				acMasks = append(acMasks, cMasks[maskIdx:maskIdx+mIdx]...)
+				acMasks = append(acMasks, blockProof.CMasks[maskIdx:maskIdx+mIdx]...)
 			}
 			if sIdx > 0 {
-				acShortKeys = append(acShortKeys, cShortKeys[shortIdx:shortIdx+sIdx]...)
+				acShortKeys = append(acShortKeys, blockProof.CShortKeys[shortIdx:shortIdx+sIdx]...)
 			}
 			if vIdx > 0 {
-				acValues = append(acValues, cValues[valueIdx:valueIdx+vIdx]...)
+				acValues = append(acValues, blockProof.CValues[valueIdx:valueIdx+vIdx]...)
 			}
 			if hIdx > 0 {
-				acHashes = append(acHashes, cHashes[hashIdx:hashIdx+hIdx]...)
+				acHashes = append(acHashes, blockProof.CHashes[hashIdx:hashIdx+hIdx]...)
 			}
 			aContracts = append(aContracts, contract)
 		} else {
 			mIdx, hIdx, sIdx, vIdx, acMasks, acShortKeys, acValues, acHashes = st.AmmendProofs(
-				cMasks[maskIdx:], cShortKeys[shortIdx:], cValues[valueIdx:], cHashes[hashIdx:],
+				blockProof.CMasks[maskIdx:], blockProof.CShortKeys[shortIdx:], blockProof.CValues[valueIdx:], blockProof.CHashes[hashIdx:],
 				acMasks, acShortKeys, acValues, acHashes,
 				trace)
 			aContracts = append(aContracts, contract)
@@ -193,9 +181,9 @@ func (s *Stateless) ThinProof(
 		hashIdx += hIdx
 		valueIdx += vIdx
 	}
-	aCodes = [][]byte{}
+	aCodes := [][]byte{}
 	var codeHash common.Hash
-	for _, code := range codes {
+	for _, code := range blockProof.Codes {
 		h.sha.Reset()
 		h.sha.Write(code)
 		h.sha.Read(codeHash[:])
@@ -203,27 +191,17 @@ func (s *Stateless) ThinProof(
 			aCodes = append(aCodes, code)
 		}
 	}
-	return
+	return BlockProof{aContracts, acMasks, acHashes, acShortKeys, acValues, aCodes, aMasks, aHashes, aShortKeys, aValues}
 }
 
-func (s *Stateless) ApplyThinProof(stateRoot common.Hash,
-	contracts []common.Address,
-	cMasks []uint16,
-	cHashes []common.Hash,
-	cShortKeys [][]byte,
-	cValues [][]byte,
-	codes [][]byte,
-	masks []uint16,
-	hashes []common.Hash,
-	shortKeys [][]byte,
-	values [][]byte,
+func (s *Stateless) ApplyThinProof(stateRoot common.Hash, blockProof BlockProof,
 	blockNr uint64,
 	trace bool,
 ) error {
 	h := newHasher()
 	defer returnHasherToPool(h)
-	if len(masks) > 0 {
-		s.t.ApplyProofs(masks, shortKeys, values, hashes, trace)
+	if len(blockProof.Masks) > 0 {
+		s.t.ApplyProofs(blockProof.Masks, blockProof.ShortKeys, blockProof.Values, blockProof.Hashes, trace)
 		if stateRoot != s.t.Hash() {
 			filename := fmt.Sprintf("root_%d.txt", blockNr)
 			f, err := os.Create(filename)
@@ -235,7 +213,7 @@ func (s *Stateless) ApplyThinProof(stateRoot common.Hash,
 		}
 	}
 	var maskIdx, hashIdx, shortIdx, valueIdx int
-	for _, contract := range contracts {
+	for _, contract := range blockProof.Contracts {
 		if trace {
 			fmt.Printf("TRIE %x ==============================================\n", contract)
 		}
@@ -247,10 +225,11 @@ func (s *Stateless) ApplyThinProof(stateRoot common.Hash,
 		var ok bool
 		var mIdx, hIdx, sIdx, vIdx int
 		if st, ok = s.storageTries[addrHash]; !ok {
-			st, mIdx, hIdx, sIdx, vIdx = trie.NewFromProofs(StorageBucket, nil, true, cMasks[maskIdx:], cShortKeys[shortIdx:], cValues[valueIdx:], cHashes[hashIdx:], trace)
+			st, mIdx, hIdx, sIdx, vIdx = trie.NewFromProofs(StorageBucket, nil, true,
+				blockProof.CMasks[maskIdx:], blockProof.CShortKeys[shortIdx:], blockProof.CValues[valueIdx:], blockProof.CHashes[hashIdx:], trace)
 			s.storageTries[addrHash] = st
 		} else {
-			mIdx, hIdx, sIdx, vIdx = st.ApplyProofs(cMasks[maskIdx:], cShortKeys[shortIdx:], cValues[valueIdx:], cHashes[hashIdx:], trace)
+			mIdx, hIdx, sIdx, vIdx = st.ApplyProofs(blockProof.CMasks[maskIdx:], blockProof.CShortKeys[shortIdx:], blockProof.CValues[valueIdx:], blockProof.CHashes[hashIdx:], trace)
 		}
 		enc, err := s.t.TryGet(nil,  addrHash[:], blockNr)
 		if err != nil {
@@ -275,7 +254,7 @@ func (s *Stateless) ApplyThinProof(stateRoot common.Hash,
 		valueIdx += vIdx
 	}
 	var codeHash common.Hash
-	for _, code := range codes {
+	for _, code := range blockProof.Codes {
 		h.sha.Reset()
 		h.sha.Write(code)
 		h.sha.Read(codeHash[:])

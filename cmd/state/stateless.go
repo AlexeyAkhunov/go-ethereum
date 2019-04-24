@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"bufio"
@@ -74,6 +75,39 @@ func runBlock(tds *state.TrieDbState, dbstate *state.Stateless, chainConfig *par
 	return nil
 }
 
+func writeStats(w io.Writer, blockNum uint64, blockProof state.BlockProof) {
+	var totalCShorts, totalCValues, totalCodes, totalShorts, totalValues int
+	for _, short := range blockProof.CShortKeys {
+		l := len(short)
+		if short[l-1] == 16 {
+			l -= 1
+		}
+		l = l/2 + 1
+		totalCShorts += l
+	}
+	for _, value := range blockProof.CValues {
+		totalCValues += len(value)
+	}
+	for _, code := range blockProof.Codes {
+		totalCodes += len(code)
+	}
+	for _, short := range blockProof.ShortKeys {
+		l := len(short)
+		if short[l-1] == 16 {
+			l -= 1
+		}
+		l = l/2 + 1
+		totalShorts += l
+	}
+	for _, value := range blockProof.Values {
+		totalValues += len(value)
+	}
+	fmt.Fprintf(w, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
+		blockNum, len(blockProof.Contracts), len(blockProof.CMasks), len(blockProof.CHashes), len(blockProof.CShortKeys), len(blockProof.CValues), len(blockProof.Codes),
+		len(blockProof.Masks), len(blockProof.Hashes), len(blockProof.ShortKeys), len(blockProof.Values), totalCShorts, totalCValues, totalCodes, totalShorts, totalValues,
+	)
+}
+
 func stateless() {
 	//state.MaxTrieCacheGen = 64*1024*1024
 	startTime := time.Now()
@@ -87,8 +121,8 @@ func stateless() {
 	}()
 
 	//ethDb, err := ethdb.NewLDBDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
-	//ethDb, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
-	ethDb, err := ethdb.NewLDBDatabase("/home/akhounov/.ethereum/geth/chaindata1")
+	ethDb, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	//ethDb, err := ethdb.NewLDBDatabase("/home/akhounov/.ethereum/geth/chaindata1")
 	check(err)
 	defer ethDb.Close()
 	chainConfig := params.MainnetChainConfig
@@ -134,6 +168,7 @@ func stateless() {
 	interrupt := false
 	var thresholdBlock uint64 = 0
 	var prevStateless *state.Stateless
+	var prev256 map[uint64]*state.Stateless
 	for !interrupt {
 		trace := false
 		if trace {
@@ -198,13 +233,8 @@ func stateless() {
 			//save_snapshot(db, fmt.Sprintf("state_%d", blockNum))
 		}
 		if blockNum >= thresholdBlock {
-			contracts, cMasks, cHashes, cShortKeys, cValues, codes, masks, hashes, shortKeys, values := tds.ExtractProofs(trace)
-			dbstate, err := state.NewStateless(preRoot,
-				contracts, cMasks, cHashes, cShortKeys, cValues,
-				codes,
-				masks, hashes, shortKeys, values,
-				block.NumberU64()-1, trace,
-			)
+			blockProof := tds.ExtractProofs(trace)
+			dbstate, err := state.NewStateless(preRoot, blockProof, block.NumberU64()-1, trace)
 			if err != nil {
 				fmt.Printf("Error making state for block %d: %v\n", blockNum, err)
 				prevStateless = nil
@@ -212,107 +242,18 @@ func stateless() {
 				if err := runBlock(tds, dbstate, chainConfig, bcb, header, block, trace); err != nil {
 					fmt.Printf("Error running block %d through stateless0: %v", err)
 				} else {
-					var totalCShorts, totalCValues, totalCodes, totalShorts, totalValues int
-					for _, short := range cShortKeys {
-						l := len(short)
-						if short[l-1] == 16 {
-							l -= 1
-						}
-						l = l/2 + 1
-						totalCShorts += l
-					}
-					for _, value := range cValues {
-						totalCValues += len(value)
-					}
-					for _, code := range codes {
-						totalCodes += len(code)
-					}
-					for _, short := range shortKeys {
-						l := len(short)
-						if short[l-1] == 16 {
-							l -= 1
-						}
-						l = l/2 + 1
-						totalShorts += l
-					}
-					for _, value := range values {
-						totalValues += len(value)
-					}
-					fmt.Fprintf(w, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
-						blockNum, len(contracts), len(cMasks), len(cHashes), len(cShortKeys), len(cValues), len(codes),
-						len(masks), len(hashes), len(shortKeys), len(values), totalCShorts, totalCValues, totalCodes, totalShorts, totalValues,
-					)
+					writeStats(w, blockNum, blockProof)
 				}
 				if prevStateless != nil {
-					aContracts, acMasks, acHashes, acShortKeys, acValues,
-					aCodes, aMasks, aHashes, aShortKeys, aValues := prevStateless.ThinProof(contracts, cMasks, cHashes, cShortKeys, cValues,
-					codes,
-					masks, hashes, shortKeys, values, trace)
-					if trace {
-						fmt.Printf("THIN PROOF:\n")
-						fmt.Printf("Masks:")
-						for _, mask := range aMasks {
-							fmt.Printf(" %16b", mask)
-						}
-						fmt.Printf("\n")
-						fmt.Printf("Shorts:")
-						for _, short := range aShortKeys {
-							fmt.Printf(" %x", short)
-						}
-						fmt.Printf("\n")
-						fmt.Printf("Hashes:")
-						for _, hash := range aHashes {
-							fmt.Printf(" %x", hash[:4])
-						}
-						fmt.Printf("\n")
-						fmt.Printf("Values:")
-						for _, value := range aValues {
-							if value == nil {
-								fmt.Printf(" nil")
-							} else {
-								fmt.Printf(" %x", value)
-							}
-						}
-						fmt.Printf("\n")
-					}
-					err = prevStateless.ApplyThinProof(preRoot, aContracts, acMasks, acHashes, acShortKeys, acValues,
-						aCodes, aMasks, aHashes, aShortKeys, aValues, block.NumberU64()-1, trace)
+					aBlockProof := prevStateless.ThinProof(blockProof, trace)
+					err = prevStateless.ApplyThinProof(preRoot, aBlockProof, block.NumberU64()-1, trace)
 					if err != nil {
 						panic(err)
 					}
 					if err := runBlock(tds, prevStateless, chainConfig, bcb, header, block, trace); err != nil {
 						fmt.Printf("[THIN] Error running block %d through stateless0: %v", err)
 					} else {
-						var aTotalCShorts, aTotalCValues, aTotalCodes, aTotalShorts, aTotalValues int
-						for _, short := range acShortKeys {
-							l := len(short)
-							if short[l-1] == 16 {
-								l -= 1
-							}
-							l = l/2 + 1
-							aTotalCShorts += l
-						}
-						for _, value := range acValues {
-							aTotalCValues += len(value)
-						}
-						for _, code := range aCodes {
-							aTotalCodes += len(code)
-						}
-						for _, short := range aShortKeys {
-							l := len(short)
-							if short[l-1] == 16 {
-								l -= 1
-							}
-							l = l/2 + 1
-							aTotalShorts += l
-						}
-						for _, value := range aValues {
-							aTotalValues += len(value)
-						}
-						fmt.Fprintf(wf, "%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
-							blockNum, len(aContracts), len(acMasks), len(acHashes), len(acShortKeys), len(acValues), len(aCodes),
-							len(aMasks), len(aHashes), len(aShortKeys), len(aValues), aTotalCShorts, aTotalCValues, aTotalCodes, aTotalShorts, aTotalValues,
-						)
+						writeStats(wf, blockNum, aBlockProof)
 					}
 				}
 				prevStateless = dbstate

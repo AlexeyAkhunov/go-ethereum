@@ -445,11 +445,7 @@ func (tds *TrieDbState) extractProofs(prefix []byte, trace bool) (
 	return masks, hashes, shortKeys, values
 }
 
-func (tds *TrieDbState) ExtractProofs(trace bool) (
-	contracts []common.Address, cMasks []uint16, cHashes []common.Hash, cShortKeys [][]byte, cValues [][]byte,
-	codes [][]byte,
-	masks []uint16, hashes []common.Hash, shortKeys [][]byte, values [][]byte,
-) {
+func (tds *TrieDbState) ExtractProofs(trace bool) BlockProof {
 	if trace {
 		fmt.Printf("Extracting proofs for block %d\n", tds.blockNr)
 	}
@@ -475,6 +471,11 @@ func (tds *TrieDbState) ExtractProofs(trace bool) (
 		}
 	}
 	sort.Strings(prefixes)
+	var contracts []common.Address
+	var cMasks []uint16
+	var cHashes []common.Hash
+	var cShortKeys [][]byte
+	var cValues [][]byte
 	for _, prefix := range prefixes {
 		m, h, s, v := tds.extractProofs([]byte(prefix), trace)
 		if len(m) > 0 || len(h) > 0 || len(s) > 0 || len(v) > 0 {
@@ -485,7 +486,8 @@ func (tds *TrieDbState) ExtractProofs(trace bool) (
 			cValues = append(cValues, v...)
 		}
 	}
-	masks, hashes, shortKeys, values = tds.extractProofs(nil, trace)
+	masks, hashes, shortKeys, values := tds.extractProofs(nil, trace)
+	var codes [][]byte
 	for _, code := range tds.proofCodes {
 		codes = append(codes, code)
 	}
@@ -505,7 +507,7 @@ func (tds *TrieDbState) ExtractProofs(trace bool) (
 	tds.sValues = make(map[string]map[string][]byte)
 	tds.proofCodes = make(map[common.Hash][]byte)
 	tds.createdCodes = make(map[common.Hash]struct{})
-	return contracts, cMasks, cHashes, cShortKeys, cValues, codes, masks, hashes, shortKeys, values
+	return BlockProof{contracts, cMasks, cHashes, cShortKeys, cValues, codes, masks, hashes, shortKeys, values}
 }
 
 func (tds *TrieDbState) PrintTrie(w io.Writer) {
