@@ -108,7 +108,7 @@ func writeStats(w io.Writer, blockNum uint64, blockProof state.BlockProof) {
 	)
 }
 
-func stateless() {
+func stateless(lag int) {
 	//state.MaxTrieCacheGen = 64*1024*1024
 	startTime := time.Now()
 	sigs := make(chan os.Signal, 1)
@@ -121,8 +121,8 @@ func stateless() {
 	}()
 
 	//ethDb, err := ethdb.NewLDBDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
-	ethDb, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
-	//ethDb, err := ethdb.NewLDBDatabase("/home/akhounov/.ethereum/geth/chaindata1")
+	//ethDb, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	ethDb, err := ethdb.NewLDBDatabase("/home/akhounov/.ethereum/geth/chaindata1")
 	check(err)
 	defer ethDb.Close()
 	chainConfig := params.MainnetChainConfig
@@ -132,11 +132,10 @@ func stateless() {
 	defer slFile.Close()
 	w := bufio.NewWriter(slFile)
 	defer w.Flush()
-	slfFile, err := os.OpenFile("statelessfull.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	slfFile, err := os.OpenFile(fmt.Sprintf("stateless_%d.csv", lag), os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	check(err)
 	defer slfFile.Close()
 	wf := bufio.NewWriter(slfFile)
-	defer wf.Flush()
 	vmConfig := vm.Config{}
 	engine := ethash.NewFullFaker()
 	bcb, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vm.Config{}, nil)
@@ -167,8 +166,7 @@ func stateless() {
 	tds.SetNoHistory(true)
 	interrupt := false
 	var thresholdBlock uint64 = 0
-	var prevStateless *state.Stateless
-	var prev256 map[uint64]*state.Stateless
+	prev := make(map[uint64]*state.Stateless)
 	for !interrupt {
 		trace := false
 		if trace {
@@ -237,26 +235,41 @@ func stateless() {
 			dbstate, err := state.NewStateless(preRoot, blockProof, block.NumberU64()-1, trace)
 			if err != nil {
 				fmt.Printf("Error making state for block %d: %v\n", blockNum, err)
-				prevStateless = nil
 			} else {
 				if err := runBlock(tds, dbstate, chainConfig, bcb, header, block, trace); err != nil {
 					fmt.Printf("Error running block %d through stateless0: %v", err)
 				} else {
 					writeStats(w, blockNum, blockProof)
 				}
-				if prevStateless != nil {
-					aBlockProof := prevStateless.ThinProof(blockProof, trace)
-					err = prevStateless.ApplyThinProof(preRoot, aBlockProof, block.NumberU64()-1, trace)
-					if err != nil {
-						panic(err)
-					}
-					if err := runBlock(tds, prevStateless, chainConfig, bcb, header, block, trace); err != nil {
-						fmt.Printf("[THIN] Error running block %d through stateless0: %v", err)
-					} else {
-						writeStats(wf, blockNum, aBlockProof)
+			}
+			// Generalised logic for 256 block proofs aggregate
+			genState, err := state.NewStateless(preRoot, blockProof, block.NumberU64()-1, false)
+			if err != nil {
+				fmt.Printf("Error making state for block %d (generalised): %v\n", blockNum, err)
+			} else {
+				if err := runBlock(tds, genState, chainConfig, bcb, header, block, trace); err != nil {
+					fmt.Printf("Error running block %d through stateless0 (generalised): %v", blockNum, err)
+				} else {
+					prev[blockNum] = genState
+				}
+			}
+			for i := 1; i <= lag; i++ {
+				if blockNum > uint64(i) {
+					if prev, ok := prev[blockNum-uint64(i)]; ok {
+						pBlockProof := prev.ThinProof(blockProof, false)
+						if err := prev.ApplyThinProof(preRoot, pBlockProof, block.NumberU64()-1, false); err != nil {
+							panic(err)
+						}
+						if err := runBlock(tds, prev, chainConfig, bcb, header, block, false); err != nil {
+							fmt.Printf("[PREV256] Error running block %d through stateless0: %v\n", err)
+						} else if i == lag {
+							writeStats(wf, blockNum, pBlockProof)
+						}
 					}
 				}
-				prevStateless = dbstate
+			}
+			if blockNum > uint64(lag) {
+				delete(prev, blockNum-uint64(lag))
 			}
 		}
 		preRoot = header.Root
