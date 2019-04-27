@@ -36,7 +36,7 @@ var chartColors = []drawing.Color{
 }
 
 func runBlock(tds *state.TrieDbState, dbstate *state.Stateless, chainConfig *params.ChainConfig,
-	bcb core.ChainContext, header *types.Header, block *types.Block, trace bool,
+	bcb core.ChainContext, header *types.Header, block *types.Block, trace bool, checkRoot bool,
 ) error {
 	vmConfig := vm.Config{}
 	engine := ethash.NewFullFaker()
@@ -63,7 +63,7 @@ func runBlock(tds *state.TrieDbState, dbstate *state.Stateless, chainConfig *par
 	if err := statedb.Commit(chainConfig.IsEIP158(header.Number), dbstate); err != nil {
 		return fmt.Errorf("Commiting block %d failed: %v", block.NumberU64(), err)
 	}
-	if err := dbstate.CheckRoot(header.Root); err != nil {
+	if err := dbstate.CheckRoot(header.Root, checkRoot); err != nil {
 		filename := fmt.Sprintf("right_%d.txt", block.NumberU64())
 		f, err1 := os.Create(filename)
 		if err1 == nil {
@@ -121,8 +121,8 @@ func stateless(lag int) {
 	}()
 
 	//ethDb, err := ethdb.NewLDBDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
-	//ethDb, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
-	ethDb, err := ethdb.NewLDBDatabase("/home/akhounov/.ethereum/geth/chaindata1")
+	ethDb, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	//ethDb, err := ethdb.NewLDBDatabase("/home/akhounov/.ethereum/geth/chaindata1")
 	check(err)
 	defer ethDb.Close()
 	chainConfig := params.MainnetChainConfig
@@ -236,7 +236,7 @@ func stateless(lag int) {
 			if err != nil {
 				fmt.Printf("Error making state for block %d: %v\n", blockNum, err)
 			} else {
-				if err := runBlock(tds, dbstate, chainConfig, bcb, header, block, trace); err != nil {
+				if err := runBlock(tds, dbstate, chainConfig, bcb, header, block, trace, true); err != nil {
 					fmt.Printf("Error running block %d through stateless0: %v", err)
 				} else {
 					writeStats(w, blockNum, blockProof)
@@ -247,7 +247,7 @@ func stateless(lag int) {
 			if err != nil {
 				fmt.Printf("Error making state for block %d (generalised): %v\n", blockNum, err)
 			} else {
-				if err := runBlock(tds, genState, chainConfig, bcb, header, block, trace); err != nil {
+				if err := runBlock(tds, genState, chainConfig, bcb, header, block, trace, false); err != nil {
 					fmt.Printf("Error running block %d through stateless0 (generalised): %v", blockNum, err)
 				} else {
 					prev[blockNum] = genState
@@ -260,7 +260,7 @@ func stateless(lag int) {
 						if err := prev.ApplyThinProof(preRoot, pBlockProof, block.NumberU64()-1, false); err != nil {
 							panic(err)
 						}
-						if err := runBlock(tds, prev, chainConfig, bcb, header, block, false); err != nil {
+						if err := runBlock(tds, prev, chainConfig, bcb, header, block, false, i == lag); err != nil {
 							fmt.Printf("[PREV256] Error running block %d through stateless0: %v\n", err)
 						} else if i == lag {
 							writeStats(wf, blockNum, pBlockProof)
@@ -291,8 +291,8 @@ func stateless(lag int) {
 }
 
 
-func stateless_chart_key_values(right []int, chartFileName string, start int, startColor int) {
-	file, err := os.Open("stateless2.csv")
+func stateless_chart_key_values(filename string, right []int, chartFileName string, start int, startColor int) {
+	file, err := os.Open(filename)
 	check(err)
 	defer file.Close()
 	reader := csv.NewReader(bufio.NewReader(file))

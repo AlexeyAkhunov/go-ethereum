@@ -352,7 +352,7 @@ func (s *Stateless) UpdateAccountData(address common.Address, original, account 
 	return nil
 }
 
-func (s *Stateless) CheckRoot(expected common.Hash) error {
+func (s *Stateless) CheckRoot(expected common.Hash, check bool) error {
 	h := newHasher()
 	defer returnHasherToPool(h)
 	// Process updates first, deletes next
@@ -377,14 +377,14 @@ func (s *Stateless) CheckRoot(expected common.Hash) error {
 		sort.Sort(hashes)
 		for _, keyHash := range hashes {
 			v := m[keyHash]
+			var c *trie.TrieContinuation
 			if len(v) != 0 {
-				if err := t.TryUpdate(nil, keyHash[:], v, s.blockNr-1); err != nil {
-					return err
-				}
+				c = t.UpdateAction(keyHash[:], v)
 			} else {
-				if err := t.TryDelete(nil, keyHash[:], s.blockNr-1); err != nil {
-					return err
-				}
+				c = t.DeleteAction(keyHash[:])
+			}
+			if !c.RunWithDb(nil, s.blockNr-1) {
+				return fmt.Errorf("Unexpected resolution")
 			}
 		}
 	}
@@ -398,6 +398,7 @@ func (s *Stateless) CheckRoot(expected common.Hash) error {
 	for _, addrHash := range addrs {
 		account := s.accountUpdates[addrHash]
 		deleteStorageTrie := false
+		var c *trie.TrieContinuation
 		if account != nil {
 			storageTrie, err := s.getStorageTrie(common.Address{}, addrHash, false)
 			if err != nil {
@@ -414,28 +415,29 @@ func (s *Stateless) CheckRoot(expected common.Hash) error {
 			if err != nil {
 				return err
 			}
-			if err := s.t.TryUpdate(nil, addrHash[:], data, s.blockNr-1); err != nil {
-				return err
-			}
+			c = s.t.UpdateAction(addrHash[:], data)
 		} else {
 			deleteStorageTrie = true
-			if err := s.t.TryDelete(nil, addrHash[:], s.blockNr-1); err != nil {
-				return err
-			}
+			c = s.t.DeleteAction(addrHash[:])
+		}
+		if !c.RunWithDb(nil, s.blockNr-1) {
+			return fmt.Errorf("Unexpected resolution")
 		}
 		if deleteStorageTrie {
 			delete(s.storageTries, addrHash)
 		}
 	}
-	myRoot := s.t.Hash()
-	if myRoot != expected {
-		filename := fmt.Sprintf("root_%d.txt", s.blockNr)
-		f, err := os.Create(filename)
-		if err == nil {
-			defer f.Close()
-			s.t.Print(f)
+	if check {
+		myRoot := s.t.Hash()
+		if myRoot != expected {
+			filename := fmt.Sprintf("root_%d.txt", s.blockNr)
+			f, err := os.Create(filename)
+			if err == nil {
+				defer f.Close()
+				s.t.Print(f)
+			}
+			return fmt.Errorf("Final root: %x, expected: %x", myRoot, expected)
 		}
-		return fmt.Errorf("Final root: %x, expected: %x", myRoot, expected)
 	}
 	s.storageUpdates = make(map[common.Address]map[common.Hash][]byte)
 	s.accountUpdates = make(map[common.Hash]*Account)
