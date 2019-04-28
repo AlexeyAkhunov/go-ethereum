@@ -267,7 +267,7 @@ func NewFromProofs(bucket []byte,
 	return t, maskIdx, hashIdx, shortIdx, valueIdx
 }
 
-func ammendFullNode(n node,
+func ammendFullNode(cuttime uint64, n node,
 	pos int,
 	masks []uint16,
 	shortKeys [][]byte,
@@ -298,18 +298,19 @@ func ammendFullNode(n node,
 			strings.Repeat(" ", pos), pos, hashmask, fullnodemask, shortnodemask)
 		fmt.Printf("%s, hashes:", strings.Repeat(" ", pos))
 	}
-	if trace {
-		fmt.Printf("%s, hashes:", strings.Repeat(" ", pos), )
-	}
 	// Make a full node
 	f, ok := n.(*fullNode)
+	if ok && f.flags.tod < cuttime {
+		f = nil
+		ok = false
+	}
 	for nibble := byte(0); nibble < 16; nibble++ {
 		if (hashmask & (uint16(1)<<nibble)) != 0 {
-			if trace {
-				fmt.Printf(" %x", hashes[*hashIdx][:2])
-			}
 			hash := hashes[*hashIdx]
 			(*hashIdx)++
+			if trace {
+				fmt.Printf(" %x", hash[:2])
+			}
 			if !ok {
 				aHashes = append(aHashes, hash)
 				aHashmask |= (uint16(1)<<nibble)
@@ -333,7 +334,7 @@ func ammendFullNode(n node,
 				fmt.Printf("%sIn the loop at pos: %d, hashes: %16b, fullnodes: %16b, shortnodes: %16b, nibble %x, fchild %T\n",
 					strings.Repeat(" ", pos), pos, hashmask, fullnodemask, shortnodemask, nibble, child)
 			}
-			aMasks, aShortKeys, aValues, aHashes = ammendFullNode(child, pos+1, masks, shortKeys, values, hashes,
+			aMasks, aShortKeys, aValues, aHashes = ammendFullNode(cuttime, child, pos+1, masks, shortKeys, values, hashes,
 				maskIdx, shortIdx, valueIdx, hashIdx,
 				aMasks, aShortKeys, aValues, aHashes, trace)
 			aFullnodemask |= (uint16(1)<<nibble)
@@ -342,7 +343,7 @@ func ammendFullNode(n node,
 				fmt.Printf("%sIn the loop at pos: %d, hashes: %16b, fullnodes: %16b, shortnodes: %16b, nibble %x, schild %T\n",
 					strings.Repeat(" ", pos), pos, hashmask, fullnodemask, shortnodemask, nibble, child)
 			}
-			aMasks, aShortKeys, aValues, aHashes = ammendShortNode(child, pos+1, masks, shortKeys, values, hashes,
+			aMasks, aShortKeys, aValues, aHashes = ammendShortNode(cuttime, child, pos+1, masks, shortKeys, values, hashes,
 				maskIdx, shortIdx, valueIdx, hashIdx,
 				aMasks, aShortKeys, aValues, aHashes, trace)
 			aShortnodemask |= (uint16(1)<<nibble)
@@ -355,7 +356,7 @@ func ammendFullNode(n node,
 	return aMasks, aShortKeys, aValues, aHashes
 }
 
-func ammendShortNode(n node,
+func ammendShortNode(cuttime uint64, n node,
 	pos int,
 	masks []uint16,
 	shortKeys [][]byte,
@@ -370,13 +371,17 @@ func ammendShortNode(n node,
 ) ([]uint16, [][]byte, [][]byte, []common.Hash) {
 	downmask := masks[*maskIdx]
 	(*maskIdx)++
-	if trace {
-		fmt.Printf("%spos: %d, down: %16b", strings.Repeat(" ", pos), pos, downmask)
-	}
 	// short node (leaf or extension)
 	nKey := shortKeys[*shortIdx]
 	(*shortIdx)++
+	if trace {
+		fmt.Printf("%spos: %d, down: %16b, nKey %x", strings.Repeat(" ", pos), pos, downmask, nKey)
+	}
 	s, ok := n.(*shortNode)
+	if ok && s.flags.tod < cuttime {
+		s = nil
+		ok = false
+	}
 	if trace {
 		fmt.Printf("\n")
 	}
@@ -416,7 +421,7 @@ func ammendShortNode(n node,
 				val = s.Val
 				aMasks = append(aMasks, 7)
 			}
-			aMasks, aShortKeys, aValues, aHashes = ammendFullNode(
+			aMasks, aShortKeys, aValues, aHashes = ammendFullNode(cuttime,
 				val, pos+len(nKey), masks, shortKeys, values, hashes,
 				maskIdx, shortIdx, valueIdx, hashIdx,
 				aMasks, aShortKeys, aValues, aHashes,
@@ -427,6 +432,7 @@ func ammendShortNode(n node,
 }
 
 func (t *Trie) AmmendProofs(
+	cuttime uint64,
 	masks []uint16,
 	shortKeys [][]byte,
 	values [][]byte,
@@ -445,11 +451,11 @@ func (t *Trie) AmmendProofs(
 	maskIdx = 1
 	aMasks = append(aMasks, firstMask)
 	if firstMask == 0 {
-		aMasks_, aShortKeys_, aValues_, aHashes_ = ammendFullNode(t.root, 0, masks, shortKeys, values, hashes,
+		aMasks_, aShortKeys_, aValues_, aHashes_ = ammendFullNode(cuttime, t.root, 0, masks, shortKeys, values, hashes,
 			&maskIdx, &shortIdx, &valueIdx, &hashIdx,
 			aMasks, aShortKeys, aValues, aHashes, trace)
 	} else {
-		aMasks_, aShortKeys_, aValues_, aHashes_ = ammendShortNode(t.root, 0, masks, shortKeys, values, hashes,
+		aMasks_, aShortKeys_, aValues_, aHashes_ = ammendShortNode(cuttime, t.root, 0, masks, shortKeys, values, hashes,
 			&maskIdx, &shortIdx, &valueIdx, &hashIdx,
 			aMasks, aShortKeys, aValues, aHashes, trace)
 	}
@@ -485,10 +491,10 @@ func applyFullNode(n node,
 	for nibble := byte(0); nibble < 16; nibble++ {
 		if (hashmask & (uint16(1)<<nibble)) != 0 {
 			hash := hashes[*hashIdx]
+			(*hashIdx)++
 			if trace {
 				fmt.Printf(" %x", hash[:2])
 			}
-			(*hashIdx)++
 			if !ok {
 				f.Children[nibble] = hashNode(hash[:])
 			}
@@ -541,17 +547,19 @@ func applyShortNode(n node,
 ) *shortNode {
 	downmask := masks[*maskIdx]
 	(*maskIdx)++
-	if trace {
-		fmt.Printf("%spos: %d, down: %16b", strings.Repeat(" ", pos), pos, downmask)
-	}
 	// short node (leaf or extension)
 	s, ok := n.(*shortNode)
 	var nKey []byte
-	if downmask == 2 || downmask == 4 || downmask == 6 {
-		nKey := shortKeys[*shortIdx]
+	if (downmask <= 1) || downmask == 2 || downmask == 4 || downmask == 6 {
+		nKey = shortKeys[*shortIdx]
 		(*shortIdx)++
+	}
+	if !ok && ((downmask <= 1) || downmask == 2 || downmask == 4 || downmask == 6) {
 		s = &shortNode{Key: hexToCompact(nKey)}
 		s.flags.dirty = true
+	}
+	if trace {
+		fmt.Printf("%spos: %d, down: %16b, nKey: %x", strings.Repeat(" ", pos), pos, downmask, nKey)
 	}
 	if trace {
 		fmt.Printf("\n")
@@ -560,6 +568,25 @@ func applyShortNode(n node,
 		}
 	}
 	switch downmask {
+	case 0:
+		if pos + len(nKey) == 65 {
+			value := values[*valueIdx]
+			(*valueIdx)++
+			s.Val = valueNode(value)
+		} else {
+			hash := hashes[*hashIdx]
+			(*hashIdx)++
+			s.Val = hashNode(hash[:])
+		}
+	case 1:
+		if pos + len(nKey) == 65 {
+			value := values[*valueIdx]
+			(*valueIdx)++
+			s.Val = valueNode(value)
+		} else {
+			s.Val = applyFullNode(s.Val, pos+len(nKey), masks, shortKeys, values, hashes,
+				maskIdx, shortIdx, valueIdx, hashIdx, trace)
+		}
 	case 2:
 		value := values[*valueIdx]
 		(*valueIdx)++
@@ -623,7 +650,12 @@ func (t *Trie) SetResolveReads(rr bool) {
 	t.resolveReads = rr
 }
 
-func (t *Trie) MakeListed(joinGeneration, leftGeneration func (gen uint64),
+func (t *Trie) MakeListed(joinGeneration, leftGeneration func (gen uint64)) {
+	t.joinGeneration = joinGeneration
+	t.leftGeneration = leftGeneration
+}
+
+func (t *Trie) ProofFunctions(
 	addProof func(prefix, key []byte, pos int, mask uint32, hashes []common.Hash),
 	addSoleHash func(prefix, key []byte, pos int, hash common.Hash),
 	createProof func(prefix, key []byte, pos int),
@@ -631,8 +663,6 @@ func (t *Trie) MakeListed(joinGeneration, leftGeneration func (gen uint64),
 	addShort func(prefix, key []byte, pos int, short []byte) bool,
 	createShort func(prefix, key []byte, pos int),
 ) {
-	t.joinGeneration = joinGeneration
-	t.leftGeneration = leftGeneration
 	t.addProof = addProof
 	t.addSoleHash = addSoleHash
 	t.createProof = createProof

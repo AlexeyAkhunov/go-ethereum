@@ -256,13 +256,15 @@ func stateless(lag int) {
 			for i := 1; i <= lag; i++ {
 				if blockNum > uint64(i) {
 					if prev, ok := prev[blockNum-uint64(i)]; ok {
-						pBlockProof := prev.ThinProof(blockProof, false)
-						if err := prev.ApplyThinProof(preRoot, pBlockProof, block.NumberU64()-1, false); err != nil {
+						//pBlockProof := prev.ThinProof(blockProof, 0, false)
+						//prev.ThinProof(blockProof, 0, false)
+						if err := prev.ApplyThinProof(preRoot, blockProof, block.NumberU64()-1, false); err != nil {
 							panic(err)
 						}
 						if err := runBlock(tds, prev, chainConfig, bcb, header, block, false, i == lag); err != nil {
 							fmt.Printf("[PREV256] Error running block %d through stateless0: %v\n", err)
 						} else if i == lag {
+							pBlockProof := prev.ThinProof(blockProof, 0, false)
 							writeStats(wf, blockNum, pBlockProof)
 						}
 					}

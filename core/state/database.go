@@ -193,7 +193,8 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 		codeCache: cc,
 		codeSizeCache: csc,
 	}
-	t.MakeListed(tds.joinGeneration, tds.leftGeneration, tds.addProof, tds.addSoleHash, tds.createProof, tds.addValue, tds.addShort, tds.createShort)
+	t.MakeListed(tds.joinGeneration, tds.leftGeneration)
+	t.ProofFunctions(tds.addProof, tds.addSoleHash, tds.createProof, tds.addValue, tds.addShort, tds.createShort)
 	tds.generationCounts = make(map[uint64]int, 4096)
 	tds.oldestGeneration = blockNr
 	return &tds, nil
@@ -1191,7 +1192,8 @@ func (tds *TrieDbState) getStorageTrie(address common.Address, addrHash common.H
 		}
 		t.SetHistorical(tds.historical)
 		t.SetResolveReads(tds.resolveReads)
-		t.MakeListed(tds.joinGeneration, tds.leftGeneration, tds.addProof, tds.addSoleHash, tds.createProof, tds.addValue, tds.addShort, tds.createShort)
+		t.MakeListed(tds.joinGeneration, tds.leftGeneration)
+		t.ProofFunctions(tds.addProof, tds.addSoleHash, tds.createProof, tds.addValue, tds.addShort, tds.createShort)
 		tds.storageTries[addrHash] = t
 	}
 	return t, nil

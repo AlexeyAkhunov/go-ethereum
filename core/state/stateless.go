@@ -128,7 +128,7 @@ func NewStateless(stateRoot common.Hash,
 	}, nil
 }
 
-func (s *Stateless) ThinProof(blockProof BlockProof, trace bool) BlockProof {
+func (s *Stateless) ThinProof(blockProof BlockProof, cuttime uint64, trace bool) BlockProof {
 	h := newHasher()
 	defer returnHasherToPool(h)
 	if trace {
@@ -138,7 +138,7 @@ func (s *Stateless) ThinProof(blockProof BlockProof, trace bool) BlockProof {
 	var aShortKeys, acShortKeys [][]byte
 	var aValues,acValues [][]byte
 	var aHashes, acHashes []common.Hash
-	_, _, _, _, aMasks, aShortKeys, aValues, aHashes = s.t.AmmendProofs(blockProof.Masks, blockProof.ShortKeys, blockProof.Values, blockProof.Hashes,
+	_, _, _, _, aMasks, aShortKeys, aValues, aHashes = s.t.AmmendProofs(cuttime, blockProof.Masks, blockProof.ShortKeys, blockProof.Values, blockProof.Hashes,
 		aMasks, aShortKeys, aValues, aHashes, trace)
 	var maskIdx, hashIdx, shortIdx, valueIdx int
 	aContracts := []common.Address{}
@@ -170,7 +170,7 @@ func (s *Stateless) ThinProof(blockProof BlockProof, trace bool) BlockProof {
 			}
 			aContracts = append(aContracts, contract)
 		} else {
-			mIdx, hIdx, sIdx, vIdx, acMasks, acShortKeys, acValues, acHashes = st.AmmendProofs(
+			mIdx, hIdx, sIdx, vIdx, acMasks, acShortKeys, acValues, acHashes = st.AmmendProofs(cuttime,
 				blockProof.CMasks[maskIdx:], blockProof.CShortKeys[shortIdx:], blockProof.CValues[valueIdx:], blockProof.CHashes[hashIdx:],
 				acMasks, acShortKeys, acValues, acHashes,
 				trace)
