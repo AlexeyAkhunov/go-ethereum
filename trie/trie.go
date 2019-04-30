@@ -613,7 +613,7 @@ func applyShortNode(n node,
 	return s
 }
 
-func (t *Trie) ApplyProofs(
+func (t *Trie) ApplyProof(
 	masks []uint16,
 	shortKeys [][]byte,
 	values [][]byte,

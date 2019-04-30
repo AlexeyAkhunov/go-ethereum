@@ -194,14 +194,14 @@ func (s *Stateless) ThinProof(blockProof BlockProof, cuttime uint64, trace bool)
 	return BlockProof{aContracts, acMasks, acHashes, acShortKeys, acValues, aCodes, aMasks, aHashes, aShortKeys, aValues}
 }
 
-func (s *Stateless) ApplyThinProof(stateRoot common.Hash, blockProof BlockProof,
+func (s *Stateless) ApplyProof(stateRoot common.Hash, blockProof BlockProof,
 	blockNr uint64,
 	trace bool,
 ) error {
 	h := newHasher()
 	defer returnHasherToPool(h)
 	if len(blockProof.Masks) > 0 {
-		s.t.ApplyProofs(blockProof.Masks, blockProof.ShortKeys, blockProof.Values, blockProof.Hashes, trace)
+		s.t.ApplyProof(blockProof.Masks, blockProof.ShortKeys, blockProof.Values, blockProof.Hashes, trace)
 		if stateRoot != s.t.Hash() {
 			filename := fmt.Sprintf("root_%d.txt", blockNr)
 			f, err := os.Create(filename)
@@ -229,7 +229,7 @@ func (s *Stateless) ApplyThinProof(stateRoot common.Hash, blockProof BlockProof,
 				blockProof.CMasks[maskIdx:], blockProof.CShortKeys[shortIdx:], blockProof.CValues[valueIdx:], blockProof.CHashes[hashIdx:], trace)
 			s.storageTries[addrHash] = st
 		} else {
-			mIdx, hIdx, sIdx, vIdx = st.ApplyProofs(blockProof.CMasks[maskIdx:], blockProof.CShortKeys[shortIdx:], blockProof.CValues[valueIdx:], blockProof.CHashes[hashIdx:], trace)
+			mIdx, hIdx, sIdx, vIdx = st.ApplyProof(blockProof.CMasks[maskIdx:], blockProof.CShortKeys[shortIdx:], blockProof.CValues[valueIdx:], blockProof.CHashes[hashIdx:], trace)
 		}
 		enc, err := s.t.TryGet(nil,  addrHash[:], blockNr)
 		if err != nil {

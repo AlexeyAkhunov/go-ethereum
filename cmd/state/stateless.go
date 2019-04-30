@@ -166,7 +166,8 @@ func stateless(lag int) {
 	tds.SetNoHistory(true)
 	interrupt := false
 	var thresholdBlock uint64 = 0
-	prev := make(map[uint64]*state.Stateless)
+	//prev := make(map[uint64]*state.Stateless)
+	var proofGen *state.Stateless
 	for !interrupt {
 		trace := false
 		if trace {
@@ -242,7 +243,22 @@ func stateless(lag int) {
 					writeStats(w, blockNum, blockProof)
 				}
 			}
+			if proofGen == nil {
+				proofGen, err = state.NewStateless(preRoot, blockProof, block.NumberU64()-1, false)
+				if err != nil {
+					fmt.Printf("Error making state for block %d (generalised): %v\n", blockNum, err)
+				}
+			}
+			if proofGen != nil {
+				if err := proofGen.ApplyProof(preRoot, blockProof, block.NumberU64()-1, false); err != nil {
+					panic(err)
+				}
+				if err := runBlock(tds, proofGen, chainConfig, bcb, header, block, trace, false); err != nil {
+					fmt.Printf("Error running block %d through stateless0 (generalised): %v", blockNum, err)
+				}
+			}
 			// Generalised logic for 256 block proofs aggregate
+			/*
 			genState, err := state.NewStateless(preRoot, blockProof, block.NumberU64()-1, false)
 			if err != nil {
 				fmt.Printf("Error making state for block %d (generalised): %v\n", blockNum, err)
@@ -253,12 +269,12 @@ func stateless(lag int) {
 					prev[blockNum] = genState
 				}
 			}
+			*/
+			/*
 			for i := 1; i <= lag; i++ {
 				if blockNum > uint64(i) {
 					if prev, ok := prev[blockNum-uint64(i)]; ok {
-						//pBlockProof := prev.ThinProof(blockProof, 0, false)
-						//prev.ThinProof(blockProof, 0, false)
-						if err := prev.ApplyThinProof(preRoot, blockProof, block.NumberU64()-1, false); err != nil {
+						if err := prev.ApplyProof(preRoot, blockProof, block.NumberU64()-1, false); err != nil {
 							panic(err)
 						}
 						if err := runBlock(tds, prev, chainConfig, bcb, header, block, false, i == lag); err != nil {
@@ -273,13 +289,18 @@ func stateless(lag int) {
 			if blockNum > uint64(lag) {
 				delete(prev, blockNum-uint64(lag))
 			}
+			*/
+			if proofGen != nil && blockNum > uint64(lag) {
+				pBlockProof := proofGen.ThinProof(blockProof, blockNum - uint64(lag), false)
+				writeStats(wf, blockNum, pBlockProof)
+			}
 		}
 		preRoot = header.Root
 		blockNum++
-		if blockNum % 1000 == 0 {
+		//if blockNum % 1000 == 0 {
 			//tds.PruneTries(true)
 			fmt.Printf("Processed %d blocks\n", blockNum)
-		}
+		//}
 		// Check for interrupts
 		select {
 		case interrupt = <-interruptCh:
