@@ -1284,12 +1284,12 @@ func (tds *TrieDbState) PruneTries(print bool) {
 		}
 		// Unload all nodes with touch timestamp < gen
 		for addrHash, storageTrie := range tds.storageTries {
-			empty := storageTrie.UnloadOlderThan(gen)
+			empty := storageTrie.UnloadOlderThan(gen, false)
 			if empty {
 				delete(tds.storageTries, addrHash)
 			}
 		}
-		tds.t.UnloadOlderThan(gen)
+		tds.t.UnloadOlderThan(gen, false)
 		tds.oldestGeneration = gen
 		tds.nodeCount -= toRemove
 		var m runtime.MemStats

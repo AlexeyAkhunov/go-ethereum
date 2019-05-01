@@ -170,6 +170,22 @@ func (n *fullNode) duoCopy() *duoNode {
 	if !n.flags.dirty {
 		copy(c.flags.hash[:], n.flags.hash[:])
 	}
+	c.flags.t = n.flags.t
+	c.flags.tod = n.flags.tod
+	c.flags.dirty = n.flags.dirty
+	return &c
+}
+
+func (n *duoNode) fullCopy() *fullNode {
+	c := fullNode{}
+	i1, i2 := n.childrenIdx()
+	c.Children[i1] = n.child1
+	c.Children[i2] = n.child2
+	if !n.flags.dirty {
+		copy(c.flags.hash[:], n.flags.hash[:])
+	}
+	c.flags.t = n.flags.t
+	c.flags.tod = n.flags.tod
 	c.flags.dirty = n.flags.dirty
 	return &c
 }
@@ -496,7 +512,7 @@ func printDiff(n1, n2 node, w io.Writer, ind string, key string) {
 					child2 := n.Children[i]
 					if child == nil {
 						if child2 != nil {
-							fmt.Fprintf(w, "%s%s:(nil/%T)\n", ind, indices[i], child2)
+							fmt.Fprintf(w, "%s%s:(nil/%x %T)\n", ind, indices[i], child2.hash(), child2)
 						}
 					} else if child2 == nil {
 						fmt.Fprintf(w, "%s%s:(%T/nil)\n", ind, indices[i], child)

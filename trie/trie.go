@@ -130,7 +130,7 @@ func decodeEmbedded(b []byte) node {
 	return nil
 }
 
-func constructFullNode(pos int,
+func constructFullNode(ctime uint64, pos int,
 	masks []uint16,
 	shortKeys [][]byte,
 	values [][]byte,
@@ -151,6 +151,7 @@ func constructFullNode(pos int,
 	// Make a full node
 	f := &fullNode{}
 	f.flags.dirty = true
+	f.flags.t = ctime
 	for nibble := byte(0); nibble < 16; nibble++ {
 		if (hashmask & (uint16(1)<<nibble)) != 0 {
 			hash := hashes[*hashIdx]
@@ -174,18 +175,19 @@ func constructFullNode(pos int,
 			if trace {
 				fmt.Printf("%sIn the loop at pos: %d, hashes: %16b, fullnodes: %16b, shortnodes: %16b, nibble %x\n", strings.Repeat(" ", pos), pos, hashmask, fullnodemask, shortnodemask, nibble)
 			}
-			f.Children[nibble] = constructFullNode(pos+1, masks, shortKeys, values, hashes, maskIdx, shortIdx, valueIdx, hashIdx, trace)
+			f.Children[nibble] = constructFullNode(ctime, pos+1, masks, shortKeys, values, hashes, maskIdx, shortIdx, valueIdx, hashIdx, trace)
 		} else if (shortnodemask & (uint16(1)<<nibble)) != 0 {
 			if trace {
 				fmt.Printf("%sIn the loop at pos: %d, hashes: %16b, fullnodes: %16b, shortnodes: %16b, nibble %x\n", strings.Repeat(" ", pos), pos, hashmask, fullnodemask, shortnodemask, nibble)
 			}
-			f.Children[nibble] = constructShortNode(pos+1, masks, shortKeys, values, hashes, maskIdx, shortIdx, valueIdx, hashIdx, trace)
+			f.Children[nibble] = constructShortNode(ctime, pos+1, masks, shortKeys, values, hashes, maskIdx, shortIdx, valueIdx, hashIdx, trace)
 		}
 	}
+	f.adjustTod(ctime)
 	return f
 }
 
-func constructShortNode(pos int,
+func constructShortNode(ctime uint64, pos int,
 	masks []uint16,
 	shortKeys [][]byte,
 	values [][]byte,
@@ -203,6 +205,7 @@ func constructShortNode(pos int,
 	(*shortIdx)++
 	s := &shortNode{Key: hexToCompact(nKey)}
 	s.flags.dirty = true
+	s.flags.t = ctime
 	if trace {
 		fmt.Printf("\n")
 	}
@@ -221,13 +224,14 @@ func constructShortNode(pos int,
 			s.Val = hashNode(hash[:])
 			(*hashIdx)++
 		} else if downmask == 1 {
-			s.Val = constructFullNode(pos+len(nKey), masks, shortKeys, values, hashes, maskIdx, shortIdx, valueIdx, hashIdx, trace)
+			s.Val = constructFullNode(ctime, pos+len(nKey), masks, shortKeys, values, hashes, maskIdx, shortIdx, valueIdx, hashIdx, trace)
 		}
 	}
+	s.adjustTod(ctime)
 	return s
 }
 
-func NewFromProofs(bucket []byte,
+func NewFromProofs(ctime uint64, bucket []byte,
 	prefix []byte,
 	encodeToBytes bool,
 	masks []uint16,
@@ -260,9 +264,9 @@ func NewFromProofs(bucket []byte,
 	firstMask := masks[0]
 	maskIdx = 1
 	if firstMask == 0 {
-		t.root = constructFullNode(0, masks, shortKeys, values, hashes, &maskIdx, &shortIdx, &valueIdx, &hashIdx, trace)
+		t.root = constructFullNode(ctime, 0, masks, shortKeys, values, hashes, &maskIdx, &shortIdx, &valueIdx, &hashIdx, trace)
 	} else {
-		t.root = constructShortNode(0, masks, shortKeys, values, hashes, &maskIdx, &shortIdx, &valueIdx, &hashIdx, trace)
+		t.root = constructShortNode(ctime, 0, masks, shortKeys, values, hashes, &maskIdx, &shortIdx, &valueIdx, &hashIdx, trace)
 	}
 	return t, maskIdx, hashIdx, shortIdx, valueIdx
 }
@@ -300,7 +304,16 @@ func ammendFullNode(cuttime uint64, n node,
 	}
 	// Make a full node
 	f, ok := n.(*fullNode)
-	if ok && f.flags.tod < cuttime {
+	if !ok {
+		if d, dok := n.(*duoNode); dok {
+			f = d.fullCopy()
+			ok = true
+		}
+	}
+	if ok && trace {
+		fmt.Printf("%sf.flags.t %d, cuttime %d\n", strings.Repeat(" ", pos), f.flags.t, cuttime)
+	}
+	if ok && f.flags.t < cuttime {
 		f = nil
 		ok = false
 	}
@@ -378,7 +391,10 @@ func ammendShortNode(cuttime uint64, n node,
 		fmt.Printf("%spos: %d, down: %16b, nKey %x", strings.Repeat(" ", pos), pos, downmask, nKey)
 	}
 	s, ok := n.(*shortNode)
-	if ok && s.flags.tod < cuttime {
+	if ok && trace {
+		fmt.Printf("%ss.flags.t %d, cuttime %d\n", strings.Repeat(" ", pos), s.flags.t, cuttime)
+	}
+	if ok && s.flags.t < cuttime {
 		s = nil
 		ok = false
 	}
@@ -462,7 +478,7 @@ func (t *Trie) AmmendProofs(
 	return maskIdx, hashIdx, shortIdx, valueIdx, aMasks_, aShortKeys_, aValues_, aHashes_
 }
 
-func applyFullNode(n node,
+func applyFullNode(ctime uint64, n node,
 	pos int,
 	masks []uint16,
 	shortKeys [][]byte,
@@ -485,9 +501,15 @@ func applyFullNode(n node,
 	// Make a full node
 	f, ok := n.(*fullNode)
 	if !ok {
-		f = &fullNode{}
-		f.flags.dirty = true
+		if d, dok := n.(*duoNode); dok {
+			f = d.fullCopy()
+			ok = true
+		} else {
+			f = &fullNode{}
+			f.flags.dirty = true
+		}
 	}
+	f.flags.t = ctime
 	for nibble := byte(0); nibble < 16; nibble++ {
 		if (hashmask & (uint16(1)<<nibble)) != 0 {
 			hash := hashes[*hashIdx]
@@ -507,7 +529,7 @@ func applyFullNode(n node,
 	if trace {
 		fmt.Printf("\n")
 		if ok {
-			fmt.Printf("Keep existing fullnode\n")
+			fmt.Printf("%sKeep existing fullnode\n", strings.Repeat(" ", pos))
 		}
 	}
 	for nibble := byte(0); nibble < 16; nibble++ {
@@ -520,7 +542,7 @@ func applyFullNode(n node,
 				fmt.Printf("%sIn the loop at pos: %d, hashes: %16b, fullnodes: %16b, shortnodes: %16b, nibble %x, child %T\n",
 					strings.Repeat(" ", pos), pos, hashmask, fullnodemask, shortnodemask, nibble, child)
 			}
-			fn := applyFullNode(child, pos+1, masks, shortKeys, values, hashes,
+			fn := applyFullNode(ctime, child, pos+1, masks, shortKeys, values, hashes,
 				maskIdx, shortIdx, valueIdx, hashIdx, trace)
 			f.Children[nibble] = fn
 		} else if (shortnodemask & (uint16(1)<<nibble)) != 0 {
@@ -528,15 +550,16 @@ func applyFullNode(n node,
 				fmt.Printf("%sIn the loop at pos: %d, hashes: %16b, fullnodes: %16b, shortnodes: %16b, nibble %x, child %T\n",
 					strings.Repeat(" ", pos), pos, hashmask, fullnodemask, shortnodemask, nibble, child)
 			}
-			sn := applyShortNode(child, pos+1, masks, shortKeys, values, hashes,
+			sn := applyShortNode(ctime, child, pos+1, masks, shortKeys, values, hashes,
 				maskIdx, shortIdx, valueIdx, hashIdx, trace)
 			f.Children[nibble] = sn
 		}
 	}
+	f.adjustTod(ctime)
 	return f
 }
 
-func applyShortNode(n node,
+func applyShortNode(ctime uint64, n node,
 	pos int,
 	masks []uint16,
 	shortKeys [][]byte,
@@ -553,18 +576,22 @@ func applyShortNode(n node,
 	if (downmask <= 1) || downmask == 2 || downmask == 4 || downmask == 6 {
 		nKey = shortKeys[*shortIdx]
 		(*shortIdx)++
+		if ok && !bytes.Equal(compactToHex(s.Key), nKey) {
+			fmt.Printf("%s keys don't match: s.Key %x, nKey %x\n", strings.Repeat(" ", pos), compactToHex(s.Key), nKey)
+		}
 	}
 	if !ok && ((downmask <= 1) || downmask == 2 || downmask == 4 || downmask == 6) {
 		s = &shortNode{Key: hexToCompact(nKey)}
 		s.flags.dirty = true
 	}
+	s.flags.t = ctime
 	if trace {
 		fmt.Printf("%spos: %d, down: %16b, nKey: %x", strings.Repeat(" ", pos), pos, downmask, nKey)
 	}
 	if trace {
 		fmt.Printf("\n")
 		if ok {
-			fmt.Printf("keep existing short node %x\n", compactToHex(s.Key))
+			fmt.Printf("%skeep existing short node %x\n", strings.Repeat(" ", pos), compactToHex(s.Key))
 		}
 	}
 	switch downmask {
@@ -584,7 +611,7 @@ func applyShortNode(n node,
 			(*valueIdx)++
 			s.Val = valueNode(value)
 		} else {
-			s.Val = applyFullNode(s.Val, pos+len(nKey), masks, shortKeys, values, hashes,
+			s.Val = applyFullNode(ctime, s.Val, pos+len(nKey), masks, shortKeys, values, hashes,
 				maskIdx, shortIdx, valueIdx, hashIdx, trace)
 		}
 	case 2:
@@ -604,16 +631,18 @@ func applyShortNode(n node,
 			fmt.Printf("%spos = %d, len(nKey) = %d, nKey = %x\n", strings.Repeat(" ", pos), pos, len(nKey), nKey)
 		}
 	case 6:
-		s.Val = applyFullNode(nil, pos+len(nKey), masks, shortKeys, values, hashes,
+		s.Val = applyFullNode(ctime, nil, pos+len(nKey), masks, shortKeys, values, hashes,
 			maskIdx, shortIdx, valueIdx, hashIdx, trace)
 	case 7:
-		s.Val = applyFullNode(s.Val, pos+len(nKey), masks, shortKeys, values, hashes,
+		s.Val = applyFullNode(ctime, s.Val, pos+len(nKey), masks, shortKeys, values, hashes,
 			maskIdx, shortIdx, valueIdx, hashIdx, trace)
 	}
+	s.adjustTod(ctime)
 	return s
 }
 
 func (t *Trie) ApplyProof(
+	ctime uint64,
 	masks []uint16,
 	shortKeys [][]byte,
 	values [][]byte,
@@ -630,10 +659,10 @@ func (t *Trie) ApplyProof(
 		return maskIdx, hashIdx, shortIdx, valueIdx
 	}
 	if firstMask == 0 {
-		t.root = applyFullNode(t.root, 0, masks, shortKeys, values, hashes,
+		t.root = applyFullNode(ctime, t.root, 0, masks, shortKeys, values, hashes,
 			&maskIdx, &shortIdx, &valueIdx, &hashIdx, trace)
 	} else {
-		t.root = applyShortNode(t.root, 0, masks, shortKeys, values, hashes,
+		t.root = applyShortNode(ctime, t.root, 0, masks, shortKeys, values, hashes,
 			&maskIdx, &shortIdx, &valueIdx, &hashIdx, trace)
 	}
 	return maskIdx, hashIdx, shortIdx, valueIdx
@@ -2130,10 +2159,10 @@ func (t *Trie) Hash() common.Hash {
 	return common.BytesToHash(hash.(hashNode))
 }
 
-func (t *Trie) UnloadOlderThan(gen uint64) bool {
+func (t *Trie) UnloadOlderThan(gen uint64, trace bool) bool {
 	h := newHasher(t.encodeToBytes)
 	defer returnHasherToPool(h)
-	hn, unloaded := unloadOlderThan(t.root, gen, h, true)
+	hn, unloaded := unloadOlderThan(nil, t.root, gen, h, true, trace)
 	if unloaded {
 		t.root = hn
 		return true
@@ -2141,7 +2170,7 @@ func (t *Trie) UnloadOlderThan(gen uint64) bool {
 	return false
 }
 
-func unloadOlderThan(n node, gen uint64, h *hasher, isRoot bool) (hashNode, bool) {
+func unloadOlderThan(key []byte, n node, gen uint64, h *hasher, isRoot bool, trace bool) (hashNode, bool) {
 	if n == nil {
 		return nil, false
 	}
@@ -2151,16 +2180,29 @@ func unloadOlderThan(n node, gen uint64, h *hasher, isRoot bool) (hashNode, bool
 			if n.flags.dirty {
 				var hn common.Hash
 				if h.hash(n, isRoot, hn[:]) == 32 {
+					if trace {
+						fmt.Printf("unloaded key %x\n", key)
+					}
 					return hashNode(hn[:]), true
 				} else {
 					// Embedded node does not have a hash and cannot be unloaded
 					return nil, false
 				}
 			}
+			if trace {
+				fmt.Printf("unloaded key %x, t=%d, gen=%d\n", key, n.flags.t, gen)
+			}
 			return hashNode(common.CopyBytes(n.hash())), true
 		}
 		if n.flags.tod < gen {
-			if hn, unloaded := unloadOlderThan(n.Val, gen, h, false); unloaded {
+			var nextKey []byte
+			if trace {
+				nKey := compactToHex(n.Key)
+				nextKey = make([]byte, len(key) + len(nKey))
+				copy(nextKey, key)
+				copy(nextKey[len(key):], nKey)
+			}
+			if hn, unloaded := unloadOlderThan(nextKey, n.Val, gen, h, false, trace); unloaded {
 				n.Val = hn
 			}
 		}
@@ -2169,19 +2211,35 @@ func unloadOlderThan(n node, gen uint64, h *hasher, isRoot bool) (hashNode, bool
 			if n.flags.dirty {
 				var hn common.Hash
 				if h.hash(n, isRoot, hn[:]) == 32 {
+					if trace {
+						fmt.Printf("unloaded key %x, t=%d, gen=%d\n", key, n.flags.t, gen)
+					}
 					return hashNode(hn[:]), true
 				} else {
 					// Embedded node does not have a hash and cannot be unloaded
 					return nil, false
 				}
 			}
+			if trace {
+				fmt.Printf("unloaded key %x, t=%d, gen=%d\n", key, n.flags.t, gen)
+			}
 			return hashNode(common.CopyBytes(n.hash())), true
 		}
 		if n.flags.tod < gen {
-			if hn, unloaded := unloadOlderThan(n.child1, gen, h, false); unloaded {
+			var nextKey1, nextKey2 []byte
+			if trace {
+				i1, i2 := n.childrenIdx()
+				nextKey1 = make([]byte, len(key) + 1)
+				copy(nextKey1, key)
+				nextKey1[len(key)] = i1
+				nextKey2 = make([]byte, len(key) + 1)
+				copy(nextKey2, key)
+				nextKey2[len(key)] = i2
+			}
+			if hn, unloaded := unloadOlderThan(nextKey1, n.child1, gen, h, false, trace); unloaded {
 				n.child1 = hn
 			}
-			if hn, unloaded := unloadOlderThan(n.child2, gen, h, false); unloaded {
+			if hn, unloaded := unloadOlderThan(nextKey2, n.child2, gen, h, false, trace); unloaded {
 				n.child2 = hn
 			}
 		}
@@ -2190,16 +2248,29 @@ func unloadOlderThan(n node, gen uint64, h *hasher, isRoot bool) (hashNode, bool
 			if n.flags.dirty {
 				var hn common.Hash
 				if h.hash(n, isRoot, hn[:]) == 32 {
+					if trace {
+						fmt.Printf("unloaded key %x, t=%d, gen=%d\n", key, n.flags.t, gen)
+					}
 					return hashNode(hn[:]), true
+				} else {
 					// Embedded node does not have a hash and cannot be unloaded
 					return nil, false
 				}
+			}
+			if trace {
+				fmt.Printf("unloaded key %x, t=%d, gen=%d\n", key, n.flags.t, gen)
 			}
 			return hashNode(common.CopyBytes(n.hash())), true
 		}
 		for i, child := range n.Children {
 			if child != nil {
-				if hn, unloaded := unloadOlderThan(child, gen, h, false); unloaded {
+				var nextKey []byte
+				if trace {
+					nextKey = make([]byte, len(key) + 1)
+					copy(nextKey, key)
+					nextKey[len(key)] = byte(i)
+				}
+				if hn, unloaded := unloadOlderThan(nextKey, child, gen, h, false, trace); unloaded {
 					n.Children[i] = hn
 				}
 			}

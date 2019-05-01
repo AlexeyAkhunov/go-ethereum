@@ -62,7 +62,7 @@ func NewStateless(stateRoot common.Hash,
 	if trace {
 		fmt.Printf("ACCOUNT TRIE ==============================================\n")
 	}
-	t, _, _, _, _ := trie.NewFromProofs(AccountsBucket, nil, false, blockProof.Masks, blockProof.ShortKeys, blockProof.Values, blockProof.Hashes, trace)
+	t, _, _, _, _ := trie.NewFromProofs(blockNr, AccountsBucket, nil, false, blockProof.Masks, blockProof.ShortKeys, blockProof.Values, blockProof.Hashes, trace)
 	if stateRoot != t.Hash() {
 		filename := fmt.Sprintf("root_%d.txt", blockNr)
 		f, err := os.Create(filename)
@@ -78,7 +78,7 @@ func NewStateless(stateRoot common.Hash,
 		if trace {
 			fmt.Printf("TRIE %x ==============================================\n", contract)
 		}
-		st, mIdx, hIdx, sIdx, vIdx := trie.NewFromProofs(StorageBucket, nil, true,
+		st, mIdx, hIdx, sIdx, vIdx := trie.NewFromProofs(blockNr, StorageBucket, nil, true,
 			blockProof.CMasks[maskIdx:], blockProof.CShortKeys[shortIdx:], blockProof.CValues[valueIdx:], blockProof.CHashes[hashIdx:], trace)
 		h.sha.Reset()
 		h.sha.Write(contract[:])
@@ -100,7 +100,7 @@ func NewStateless(stateRoot common.Hash,
 				defer f.Close()
 				st.Print(f)
 			}
-			return nil, fmt.Errorf("Expected storage root for %x: %x, constructed root: %x", contract, account.Root, st.Hash())
+			return nil, fmt.Errorf("[THIN] Expected storage root for %x: %x, constructed root: %x", contract, account.Root, st.Hash())
 		}
 		maskIdx += mIdx
 		shortIdx += sIdx
@@ -128,7 +128,7 @@ func NewStateless(stateRoot common.Hash,
 	}, nil
 }
 
-func (s *Stateless) ThinProof(blockProof BlockProof, cuttime uint64, trace bool) BlockProof {
+func (s *Stateless) ThinProof(blockProof BlockProof, blockNr uint64, cuttime uint64, trace bool) BlockProof {
 	h := newHasher()
 	defer returnHasherToPool(h)
 	if trace {
@@ -154,7 +154,7 @@ func (s *Stateless) ThinProof(blockProof BlockProof, cuttime uint64, trace bool)
 		var ok bool
 		var mIdx, hIdx, sIdx, vIdx int
 		if st, ok = s.storageTries[addrHash]; !ok {
-			_, mIdx, hIdx, sIdx, vIdx = trie.NewFromProofs(StorageBucket, nil, true,
+			_, mIdx, hIdx, sIdx, vIdx = trie.NewFromProofs(blockNr, StorageBucket, nil, true,
 				blockProof.CMasks[maskIdx:], blockProof.CShortKeys[shortIdx:], blockProof.CValues[valueIdx:], blockProof.CHashes[hashIdx:], trace)
 			if mIdx > 0 {
 				acMasks = append(acMasks, blockProof.CMasks[maskIdx:maskIdx+mIdx]...)
@@ -200,8 +200,11 @@ func (s *Stateless) ApplyProof(stateRoot common.Hash, blockProof BlockProof,
 ) error {
 	h := newHasher()
 	defer returnHasherToPool(h)
+	if trace {
+		fmt.Printf("APPLY\n")
+	}
 	if len(blockProof.Masks) > 0 {
-		s.t.ApplyProof(blockProof.Masks, blockProof.ShortKeys, blockProof.Values, blockProof.Hashes, trace)
+		s.t.ApplyProof(blockNr, blockProof.Masks, blockProof.ShortKeys, blockProof.Values, blockProof.Hashes, trace)
 		if stateRoot != s.t.Hash() {
 			filename := fmt.Sprintf("root_%d.txt", blockNr)
 			f, err := os.Create(filename)
@@ -209,13 +212,13 @@ func (s *Stateless) ApplyProof(stateRoot common.Hash, blockProof BlockProof,
 				defer f.Close()
 				s.t.Print(f)
 			}
-			return fmt.Errorf("[THIN] Expected root: %x, Constructed root: %x", stateRoot, s.t.Hash())
+			return fmt.Errorf("[APPLY] Expected root: %x, Constructed root: %x", stateRoot, s.t.Hash())
 		}
 	}
 	var maskIdx, hashIdx, shortIdx, valueIdx int
 	for _, contract := range blockProof.Contracts {
 		if trace {
-			fmt.Printf("TRIE %x ==============================================\n", contract)
+			fmt.Printf("APPLY TRIE %x ==============================================\n", contract)
 		}
 		h.sha.Reset()
 		h.sha.Write(contract[:])
@@ -225,11 +228,11 @@ func (s *Stateless) ApplyProof(stateRoot common.Hash, blockProof BlockProof,
 		var ok bool
 		var mIdx, hIdx, sIdx, vIdx int
 		if st, ok = s.storageTries[addrHash]; !ok {
-			st, mIdx, hIdx, sIdx, vIdx = trie.NewFromProofs(StorageBucket, nil, true,
+			st, mIdx, hIdx, sIdx, vIdx = trie.NewFromProofs(blockNr, StorageBucket, nil, true,
 				blockProof.CMasks[maskIdx:], blockProof.CShortKeys[shortIdx:], blockProof.CValues[valueIdx:], blockProof.CHashes[hashIdx:], trace)
 			s.storageTries[addrHash] = st
 		} else {
-			mIdx, hIdx, sIdx, vIdx = st.ApplyProof(blockProof.CMasks[maskIdx:], blockProof.CShortKeys[shortIdx:], blockProof.CValues[valueIdx:], blockProof.CHashes[hashIdx:], trace)
+			mIdx, hIdx, sIdx, vIdx = st.ApplyProof(blockNr, blockProof.CMasks[maskIdx:], blockProof.CShortKeys[shortIdx:], blockProof.CValues[valueIdx:], blockProof.CHashes[hashIdx:], trace)
 		}
 		enc, err := s.t.TryGet(nil,  addrHash[:], blockNr)
 		if err != nil {
@@ -246,7 +249,7 @@ func (s *Stateless) ApplyProof(stateRoot common.Hash, blockProof BlockProof,
 				defer f.Close()
 				st.Print(f)
 			}
-			return fmt.Errorf("Expected storage root for %x: %x, constructed root: %x", contract, account.Root, st.Hash())
+			return fmt.Errorf("[APPLY] Expected storage root for %x: %x, constructed root: %x", contract, account.Root, st.Hash())
 		}
 		maskIdx += mIdx
 		shortIdx += sIdx
@@ -486,4 +489,15 @@ func (s *Stateless) WriteAccountStorage(address common.Address, key, original, v
 		fmt.Printf("WriteAccountStorage addr %x, keyHash %x, value %x\n", address, secKey, vv)
 	}
 	return nil
+}
+
+func (s *Stateless) Prune(oldest uint64, trace bool) {
+	s.t.UnloadOlderThan(oldest, trace)
+	for addrHash, st := range s.storageTries {
+		empty := st.UnloadOlderThan(oldest, trace)
+		if empty {
+			delete(s.storageTries, addrHash)
+		}
+	}
+	// TODO: Prune codes
 }

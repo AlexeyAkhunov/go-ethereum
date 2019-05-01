@@ -441,7 +441,7 @@ func (rds *RepairDbState) PruneTries() {
 		}
 		// Unload all nodes with touch timestamp < gen
 		for address, storageTrie := range rds.storageTries {
-			empty := storageTrie.UnloadOlderThan(gen)
+			empty := storageTrie.UnloadOlderThan(gen, false)
 			if empty {
 				delete(rds.storageTries, address)
 			}

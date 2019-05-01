@@ -167,11 +167,12 @@ func stateless(lag int) {
 	interrupt := false
 	var thresholdBlock uint64 = 0
 	//prev := make(map[uint64]*state.Stateless)
-	var proofGen *state.Stateless
+	var proofGen *state.Stateless // Generator of proofs
+	var proofCons *state.Stateless // Consumer of proofs
 	for !interrupt {
-		trace := false
+		trace := blockNum == 267
 		if trace {
-			filename := fmt.Sprintf("right_%d.txt", blockNum)
+			filename := fmt.Sprintf("right_%d.txt", blockNum-1)
 			f, err1 := os.Create(filename)
 			if err1 == nil {
 				defer f.Close()
@@ -243,18 +244,16 @@ func stateless(lag int) {
 					writeStats(w, blockNum, blockProof)
 				}
 			}
+			if proofCons == nil {
+				proofCons, err = state.NewStateless(preRoot, blockProof, block.NumberU64()-1, false)
+				if err != nil {
+					fmt.Printf("Error making proof consumer for block %d: %v\n", blockNum, err)
+				}
+			}
 			if proofGen == nil {
 				proofGen, err = state.NewStateless(preRoot, blockProof, block.NumberU64()-1, false)
 				if err != nil {
-					fmt.Printf("Error making state for block %d (generalised): %v\n", blockNum, err)
-				}
-			}
-			if proofGen != nil {
-				if err := proofGen.ApplyProof(preRoot, blockProof, block.NumberU64()-1, false); err != nil {
-					panic(err)
-				}
-				if err := runBlock(tds, proofGen, chainConfig, bcb, header, block, trace, false); err != nil {
-					fmt.Printf("Error running block %d through stateless0 (generalised): %v", blockNum, err)
+					fmt.Printf("Error making proof generator for block %d: %v\n", blockNum, err)
 				}
 			}
 			// Generalised logic for 256 block proofs aggregate
@@ -290,17 +289,39 @@ func stateless(lag int) {
 				delete(prev, blockNum-uint64(lag))
 			}
 			*/
-			if proofGen != nil && blockNum > uint64(lag) {
-				pBlockProof := proofGen.ThinProof(blockProof, blockNum - uint64(lag), false)
-				writeStats(wf, blockNum, pBlockProof)
+			if proofGen != nil && proofCons != nil {
+				if blockNum > uint64(lag) {
+					pBlockProof := proofGen.ThinProof(blockProof, block.NumberU64()-1, blockNum - uint64(lag), false)
+					if err := proofCons.ApplyProof(preRoot, pBlockProof, block.NumberU64()-1, false); err != nil {
+						panic(err)
+					}
+					writeStats(wf, blockNum, pBlockProof)
+					proofGen.Prune(blockNum - uint64(lag), false)
+					proofCons.Prune(blockNum - uint64(lag), false)
+				} else {
+					if err := proofCons.ApplyProof(preRoot, blockProof, block.NumberU64()-1, false); err != nil {
+						panic(err)
+					}
+				}
+				if err := runBlock(tds, proofCons, chainConfig, bcb, header, block, trace, false); err != nil {
+					fmt.Printf("Error running block %d through proof consumer: %v", blockNum, err)
+				}
+			}
+			if proofGen != nil {
+				if err := proofGen.ApplyProof(preRoot, blockProof, block.NumberU64()-1, false); err != nil {
+					panic(err)
+				}
+				if err := runBlock(tds, proofGen, chainConfig, bcb, header, block, trace, false); err != nil {
+					fmt.Printf("Error running block %d through proof generator: %v", blockNum, err)
+				}
 			}
 		}
 		preRoot = header.Root
 		blockNum++
-		//if blockNum % 1000 == 0 {
+		if blockNum % 1000 == 0 {
 			//tds.PruneTries(true)
 			fmt.Printf("Processed %d blocks\n", blockNum)
-		//}
+		}
 		// Check for interrupts
 		select {
 		case interrupt = <-interruptCh:
