@@ -407,7 +407,6 @@ func (tds *TrieDbState) extractProofs(prefix []byte, trace bool) (
 				masks = append(masks, 1)
 			}
 			masks = append(masks, downmask)
-			//masks = append(masks, (downmask << 16))
 			shortKeys = append(shortKeys, short)
 		}
 		if value, ok := proofValues[key]; ok {

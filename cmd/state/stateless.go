@@ -108,7 +108,7 @@ func writeStats(w io.Writer, blockNum uint64, blockProof state.BlockProof) {
 	)
 }
 
-func stateless(lag int) {
+func stateless(genLag, consLag int) {
 	//state.MaxTrieCacheGen = 64*1024*1024
 	startTime := time.Now()
 	sigs := make(chan os.Signal, 1)
@@ -132,7 +132,7 @@ func stateless(lag int) {
 	defer slFile.Close()
 	w := bufio.NewWriter(slFile)
 	defer w.Flush()
-	slfFile, err := os.OpenFile(fmt.Sprintf("stateless_%d.csv", lag), os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	slfFile, err := os.OpenFile(fmt.Sprintf("stateless_%d.csv", consLag), os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	check(err)
 	defer slfFile.Close()
 	wf := bufio.NewWriter(slfFile)
@@ -290,14 +290,13 @@ func stateless(lag int) {
 			}
 			*/
 			if proofGen != nil && proofCons != nil {
-				if blockNum > uint64(lag) {
-					pBlockProof := proofGen.ThinProof(blockProof, block.NumberU64()-1, blockNum - uint64(lag), false)
+				if blockNum > uint64(consLag) {
+					pBlockProof := proofGen.ThinProof(blockProof, block.NumberU64()-1, blockNum - uint64(consLag), false)
 					if err := proofCons.ApplyProof(preRoot, pBlockProof, block.NumberU64()-1, false); err != nil {
 						panic(err)
 					}
 					writeStats(wf, blockNum, pBlockProof)
-					proofGen.Prune(blockNum - uint64(lag), false)
-					proofCons.Prune(blockNum - uint64(lag), false)
+					proofCons.Prune(blockNum - uint64(consLag), false)
 				} else {
 					if err := proofCons.ApplyProof(preRoot, blockProof, block.NumberU64()-1, false); err != nil {
 						panic(err)
@@ -313,6 +312,9 @@ func stateless(lag int) {
 				}
 				if err := runBlock(tds, proofGen, chainConfig, bcb, header, block, trace, false); err != nil {
 					fmt.Printf("Error running block %d through proof generator: %v", blockNum, err)
+				}
+				if blockNum > uint64(genLag) {
+					proofGen.Prune(blockNum - uint64(genLag), false)
 				}
 			}
 		}

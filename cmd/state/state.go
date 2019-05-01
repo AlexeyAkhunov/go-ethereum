@@ -45,7 +45,8 @@ var reset = flag.Int("reset", -1, "reset to given block number")
 var rewind = flag.Int("rewind", 1, "rewind to given number of blocks")
 var block = flag.Int("block", 1, "specifies a block number for operation")
 var account = flag.String("account", "0x", "specifies account to investigate")
-var lag = flag.Int("lag", 256, "how many blocks to accumulate block proofs over")
+var genLag = flag.Int("genlag", 4096, "how many blocks to accumulate block proofs over for generator")
+var consLag = flag.Int("conslag", 256, "how many blocks to accumulate block proofs over for consumer")
 
 func check(e error) {
 	if e != nil {
@@ -1737,7 +1738,7 @@ func main() {
 	//nakedSloadChart()
 	//nakedAccountChart()
 	//specExecChart1()
-	stateless(*lag)
+	stateless(*genLag, *consLag)
 	//stateless_chart_key_values("stateless1.csv", []int{17}, "total.png", 1, 0)
 	//stateless_chart_key_values("stateless1_256.csv", []int{17}, "total256.png", 1, 0)
 	//stateless_chart_key_values([]int{17}, "total_2675000.png", 2675000, 0)

@@ -216,16 +216,19 @@ func constructShortNode(ctime uint64, pos int,
 		if trace {
 			fmt.Printf("%spos = %d, len(nKey) = %d, nKey = %x\n", strings.Repeat(" ", pos), pos, len(nKey), nKey)
 		}
-		if downmask == 0 {
+		if downmask == 0 || downmask == 4 {
 			hash := hashes[*hashIdx]
 			if trace {
 				fmt.Printf("%shash: %x\n", strings.Repeat(" ", pos), hash[:2])
 			}
 			s.Val = hashNode(hash[:])
 			(*hashIdx)++
-		} else if downmask == 1 {
+		} else if downmask == 1 || downmask == 6 {
 			s.Val = constructFullNode(ctime, pos+len(nKey), masks, shortKeys, values, hashes, maskIdx, shortIdx, valueIdx, hashIdx, trace)
 		}
+	}
+	if s.Val == nil {
+		fmt.Printf("s.Val is nil, pos %d, nKey %x, downmask %d\n", pos, nKey, downmask)
 	}
 	s.adjustTod(ctime)
 	return s
