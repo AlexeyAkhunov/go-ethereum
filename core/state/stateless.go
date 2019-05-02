@@ -41,11 +41,17 @@ type BlockProof struct {
 }
 
 /* Proof Of Concept for verification of Stateless client proofs */
+type CodeTime struct {
+	bytecode []byte
+	t uint64
+}
+
 type Stateless struct {
 	blockNr uint64
 	t *trie.Trie
 	storageTries map[common.Hash]*trie.Trie
-	codeMap map[common.Hash][]byte
+	codeMap map[common.Hash]CodeTime
+	timeToCodeHash map[uint64]map[common.Hash]struct{}
 	trace bool
 	storageUpdates map[common.Address]map[common.Hash][]byte
 	accountUpdates map[common.Hash]*Account
@@ -107,20 +113,35 @@ func NewStateless(stateRoot common.Hash,
 		hashIdx += hIdx
 		valueIdx += vIdx
 	}
-	codeMap := make(map[common.Hash][]byte)
-	codeMap[common.BytesToHash(emptyCodeHash)] = []byte{}
+	codeMap := make(map[common.Hash]CodeTime)
+	timeToCodeHash := make(map[uint64]map[common.Hash]struct{})
 	var codeHash common.Hash
 	for _, code := range blockProof.Codes {
 		h.sha.Reset()
 		h.sha.Write(code)
 		h.sha.Read(codeHash[:])
-		codeMap[codeHash] = code
+		if codeTime, ok := codeMap[codeHash]; ok {
+			m := timeToCodeHash[codeTime.t]
+			delete(m, codeHash)
+			if len(m) == 0 {
+				delete(timeToCodeHash, codeTime.t)
+			}
+		}
+		codeMap[codeHash] = CodeTime{bytecode: code, t: blockNr}
+		if m, ok := timeToCodeHash[blockNr]; ok {
+			m[codeHash] = struct{}{}
+		} else {
+			m = make(map[common.Hash]struct{})
+			timeToCodeHash[blockNr] = m
+			m[codeHash] = struct{}{}
+		}
 	}
 	return &Stateless {
 		blockNr: blockNr,
 		t: t,
 		storageTries: storageTries,
 		codeMap: codeMap,
+		timeToCodeHash: timeToCodeHash,
 		trace: trace,
 		storageUpdates: make(map[common.Address]map[common.Hash][]byte),
 		accountUpdates: make(map[common.Hash]*Account),
@@ -187,11 +208,39 @@ func (s *Stateless) ThinProof(blockProof BlockProof, blockNr uint64, cuttime uin
 		h.sha.Reset()
 		h.sha.Write(code)
 		h.sha.Read(codeHash[:])
-		if _, ok := s.codeMap[codeHash]; !ok {
+		if codeTime, ok := s.codeMap[codeHash]; ok {
+			if trace {
+				fmt.Printf("%d Code hash: %x, codeTime.t: %d, cuttime: %d\n", blockNr, codeHash, codeTime.t, cuttime)
+			}
+			if codeTime.t < cuttime {
+				aCodes = append(aCodes, code)
+			}
+		} else {
+			if trace {
+				fmt.Printf("%d Code hash: %x not found in codeMap, adding\n", blockNr, codeHash)
+			}
 			aCodes = append(aCodes, code)
 		}
 	}
 	return BlockProof{aContracts, acMasks, acHashes, acShortKeys, acValues, aCodes, aMasks, aHashes, aShortKeys, aValues}
+}
+
+func (s *Stateless) touchCodeHash(codeHash common.Hash, code []byte, blockNr uint64) {
+	if codeTime, ok := s.codeMap[codeHash]; ok {
+		m := s.timeToCodeHash[codeTime.t]
+		delete(m, codeHash)
+		if len(m) == 0 {
+			delete(s.timeToCodeHash, codeTime.t)
+		}
+	}
+	s.codeMap[codeHash] = CodeTime{bytecode: code, t: blockNr}
+	if m, ok := s.timeToCodeHash[blockNr]; ok {
+		m[codeHash] = struct{}{}
+	} else {
+		m = make(map[common.Hash]struct{})
+		s.timeToCodeHash[blockNr] = m
+		m[codeHash] = struct{}{}
+	}
 }
 
 func (s *Stateless) ApplyProof(stateRoot common.Hash, blockProof BlockProof,
@@ -261,7 +310,7 @@ func (s *Stateless) ApplyProof(stateRoot common.Hash, blockProof BlockProof,
 		h.sha.Reset()
 		h.sha.Write(code)
 		h.sha.Read(codeHash[:])
-		s.codeMap[codeHash] = code
+		s.touchCodeHash(codeHash, code, blockNr)
 	}
 	return nil
 }
@@ -320,11 +369,15 @@ func (s *Stateless) ReadAccountStorage(address common.Address, key *common.Hash)
 }
 
 func (s *Stateless) ReadAccountCode(codeHash common.Hash) ([]byte, error) {
-	if code, ok := s.codeMap[codeHash]; ok {
+	if codeHash == emptyCodeHashH {
+		return []byte{}, nil
+	}
+	if codeTime, ok := s.codeMap[codeHash]; ok {
 		if s.trace {
-			fmt.Printf("ReadAccountCode %x: %d\n", codeHash, len(code))
+			fmt.Printf("ReadAccountCode %x: %d\n", codeHash, len(codeTime.bytecode))
 		}
-		return code, nil
+		s.touchCodeHash(codeHash, codeTime.bytecode, s.blockNr)
+		return codeTime.bytecode, nil
 	} else {
 		if s.trace {
 			fmt.Printf("ReadAccountCode %x: nil\n", codeHash)
@@ -334,8 +387,12 @@ func (s *Stateless) ReadAccountCode(codeHash common.Hash) ([]byte, error) {
 }
 
 func (s *Stateless) ReadAccountCodeSize(codeHash common.Hash) (int, error) {
-	if code, ok := s.codeMap[codeHash]; ok {
-		return len(code), nil
+	if codeHash == emptyCodeHashH {
+		return 0, nil
+	}
+	if codeTime, ok := s.codeMap[codeHash]; ok {
+		s.touchCodeHash(codeHash, codeTime.bytecode, s.blockNr)
+		return len(codeTime.bytecode), nil
 	} else {
 		return 0, fmt.Errorf("Could not find code for codeHash %x\n", codeHash)
 	}
@@ -450,7 +507,7 @@ func (s *Stateless) CheckRoot(expected common.Hash, check bool) error {
 
 func (s *Stateless) UpdateAccountCode(codeHash common.Hash, code []byte) error {
 	//fmt.Printf("UpdateAccountCode\n")
-	s.codeMap[codeHash] = common.CopyBytes(code)
+	s.touchCodeHash(codeHash, code, s.blockNr)
 	return nil
 }
 
@@ -499,5 +556,13 @@ func (s *Stateless) Prune(oldest uint64, trace bool) {
 			delete(s.storageTries, addrHash)
 		}
 	}
-	// TODO: Prune codes
+	if m, ok := s.timeToCodeHash[oldest - 1]; ok {
+		for codeHash, _ := range m {
+			if trace {
+				fmt.Printf("Pruning codehash %x at time %d\n", codeHash, oldest-1)
+			}
+			delete(s.codeMap, codeHash)
+		}
+	}
+	delete(s.timeToCodeHash, oldest - 1)
 }

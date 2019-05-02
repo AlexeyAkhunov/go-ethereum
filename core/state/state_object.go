@@ -28,6 +28,7 @@ import (
 )
 
 var emptyCodeHash = crypto.Keccak256(nil)
+var emptyCodeHashH = common.BytesToHash(emptyCodeHash)
 
 type Code []byte
 

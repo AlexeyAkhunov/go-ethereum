@@ -170,7 +170,7 @@ func stateless(genLag, consLag int) {
 	var proofGen *state.Stateless // Generator of proofs
 	var proofCons *state.Stateless // Consumer of proofs
 	for !interrupt {
-		trace := blockNum == 267
+		trace := blockNum == 50439
 		if trace {
 			filename := fmt.Sprintf("right_%d.txt", blockNum-1)
 			f, err1 := os.Create(filename)
@@ -291,7 +291,7 @@ func stateless(genLag, consLag int) {
 			*/
 			if proofGen != nil && proofCons != nil {
 				if blockNum > uint64(consLag) {
-					pBlockProof := proofGen.ThinProof(blockProof, block.NumberU64()-1, blockNum - uint64(consLag), false)
+					pBlockProof := proofGen.ThinProof(blockProof, block.NumberU64()-1, blockNum - uint64(consLag), trace)
 					if err := proofCons.ApplyProof(preRoot, pBlockProof, block.NumberU64()-1, false); err != nil {
 						panic(err)
 					}

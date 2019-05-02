@@ -671,6 +671,15 @@ func (t *Trie) ApplyProof(
 	return maskIdx, hashIdx, shortIdx, valueIdx
 }
 
+func (t *Trie) AsProof(trace bool) (
+	masks []uint16,
+	shortKeys [][]byte,
+	values [][]byte,
+	hashes []common.Hash,
+) {
+	return
+}
+
 func (t *Trie) SetHistorical(h bool) {
 	t.historical = h
 	if h && !bytes.HasPrefix(t.bucket, []byte("h")) {
