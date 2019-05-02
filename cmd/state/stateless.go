@@ -109,7 +109,7 @@ func writeStats(w io.Writer, blockNum uint64, blockProof state.BlockProof) {
 }
 
 func stateless(genLag, consLag int) {
-	//state.MaxTrieCacheGen = 64*1024*1024
+	//state.MaxTrieCacheGen = 64*1024
 	startTime := time.Now()
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
@@ -121,8 +121,8 @@ func stateless(genLag, consLag int) {
 	}()
 
 	//ethDb, err := ethdb.NewLDBDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
-	ethDb, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
-	//ethDb, err := ethdb.NewLDBDatabase("/home/akhounov/.ethereum/geth/chaindata1")
+	//ethDb, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	ethDb, err := ethdb.NewLDBDatabase("/home/akhounov/.ethereum/geth/chaindata1")
 	check(err)
 	defer ethDb.Close()
 	chainConfig := params.MainnetChainConfig
@@ -321,7 +321,7 @@ func stateless(genLag, consLag int) {
 		preRoot = header.Root
 		blockNum++
 		if blockNum % 1000 == 0 {
-			//tds.PruneTries(true)
+			tds.PruneTries(true)
 			fmt.Printf("Processed %d blocks\n", blockNum)
 		}
 		// Check for interrupts
