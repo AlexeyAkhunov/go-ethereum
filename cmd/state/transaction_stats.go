@@ -1,0 +1,205 @@
+package main
+
+import (
+	"math/big"
+	"fmt"
+	"os"
+	"bufio"
+	"time"
+	"syscall"
+	"os/signal"
+
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus/ethash"
+	"github.com/ethereum/go-ethereum/core"
+	"github.com/ethereum/go-ethereum/core/state"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ethereum/go-ethereum/ethdb"
+	"github.com/ethereum/go-ethereum/params"
+)
+
+type TxTracer struct {
+	gasForSSTORE uint64
+	gasForCREATE uint64
+	gasForEthSendingCALL uint64
+	currentBlock uint64
+	sinceAccounts map[common.Address]uint64
+	sinceStorage map[common.Address]map[common.Hash]uint64
+	lastAccessedAccounts map[common.Address]uint64
+	lastAccessedStorage map[common.Address]map[common.Hash]uint64
+}
+
+func NewTxTracer() *TxTracer {
+	return &TxTracer{
+		lastAccessedAccounts: make(map[common.Address]uint64),
+		lastAccessedStorage: make(map[common.Address]map[common.Hash]uint64),
+	}
+}
+
+func (tt *TxTracer) ResetCounters() {
+	tt.gasForSSTORE = 0
+	tt.gasForCREATE = 0
+	tt.gasForEthSendingCALL = 0
+	tt.sinceAccounts = make(map[common.Address]uint64)
+	tt.sinceStorage = make(map[common.Address]map[common.Hash]uint64)
+}
+
+func (tt *TxTracer) CaptureStart(depth int, from common.Address, to common.Address, call bool, input []byte, gas uint64, value *big.Int) error {
+	return nil
+}
+
+func (tt *TxTracer) markAccountAccess(account common.Address) {
+	tt.lastAccessedAccounts[account] = tt.currentBlock
+}
+
+func (tt *TxTracer) markStorageAccess(account common.Address, storageKey common.Hash) {
+	if m, ok := tt.lastAccessedStorage[account]; ok {
+		m[storageKey] = tt.currentBlock
+	} else {
+		m = make(map[common.Hash]uint64)
+		tt.lastAccessedStorage[account] = m
+		m[storageKey] = tt.currentBlock
+	}
+}
+
+func (tt *TxTracer) queryAccountAccess(account common.Address) {
+	var q uint64
+	if blockNum, ok := tt.lastAccessedAccounts[account]; ok {
+		q = tt.currentBlock - blockNum
+	} else {
+		q = tt.currentBlock // CLARIFICATION REQUIRED - WHAT TO RETURN IF THIS IS THE FIRST ACCESS?
+	}
+	tt.sinceAccounts[account] = q
+}
+
+func (tt *TxTracer) queryStorageAccess(account common.Address, storageKey common.Hash) {
+	var q uint64
+	if m, ok1 := tt.lastAccessedStorage[account]; ok1 {
+		if blockNum, ok2 := m[storageKey]; ok2 {
+			q = tt.currentBlock - blockNum
+		}
+	}
+	q = tt.currentBlock // CLARIFICATION REQUIRED - WHAT TO RETURN IF THIS IS THE FIRST ACCESS?
+	if m, ok := tt.sinceStorage[account]; ok {
+		m[storageKey] = q
+	} else {
+		m = make(map[common.Hash]uint64)
+		tt.sinceStorage[account] = m
+		m[storageKey] = q
+	}	
+}
+
+func (tt *TxTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *vm.Stack, contract *vm.Contract, depth int, err error) error {
+	switch op {
+	case vm.SSTORE:
+		tt.gasForSSTORE += cost
+		tt.queryStorageAccess(contract.Address(), common.BigToHash(stack.Back(0)))
+		tt.markStorageAccess(contract.Address(), common.BigToHash(stack.Back(0)))
+	case vm.SLOAD:
+		tt.markStorageAccess(contract.Address(), common.BigToHash(stack.Back(0)))
+	case vm.CREATE:
+		tt.gasForCREATE += cost
+	case vm.CALL:
+		if stack.Len() >= 3 {
+			if stack.Back(2).Sign() > 0 { // top of the stack is "gas", then addr, then value
+				tt.gasForEthSendingCALL += cost
+			}
+			toAddress := common.BigToAddress(stack.Back(1))
+			tt.queryAccountAccess(toAddress)
+		}
+	}
+	return nil
+}
+func (tt *TxTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *vm.Stack, contract *vm.Contract, depth int, err error) error {
+	return nil
+}
+func (tt *TxTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error {
+	return nil
+}
+func (tt *TxTracer) CaptureCreate(creator common.Address, creation common.Address) error {
+	tt.queryAccountAccess(creation) // CLARIFICATION REQUIRED - does it make sense to measure how many blocks ago was the newly created contract accessed?
+	tt.markAccountAccess(creation)
+	return nil
+}
+func (tt *TxTracer) CaptureAccountRead(account common.Address) error {
+	tt.markAccountAccess(account)
+	return nil
+}
+func (tt *TxTracer) CaptureAccountWrite(account common.Address) error {
+	tt.markAccountAccess(account)
+	return nil
+}
+
+func transaction_stats() {
+	sigs := make(chan os.Signal, 1)
+	interruptCh := make(chan bool, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		<-sigs
+		interruptCh <- true
+	}()
+
+	//ethDb, err := ethdb.NewLDBDatabase("/home/akhounov/.ethereum/geth/chaindata")
+	//ethDb, err := ethdb.NewLDBDatabase("/Volumes/tb41/turbo-geth/geth/chaindata")
+	ethDb, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	check(err)
+	defer ethDb.Close()
+	f, err := os.OpenFile("txs.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	check(err)
+	defer f.Close()
+	w := bufio.NewWriter(f)
+	defer w.Flush()
+	fa, err := os.OpenFile("txs_accounts.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	check(err)
+	defer fa.Close()
+	wa := bufio.NewWriter(fa)
+	defer wa.Flush()
+	fs, err := os.OpenFile("txs_storage.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	check(err)
+	defer fs.Close()
+	ws := bufio.NewWriter(fs)
+	defer ws.Flush()
+	tt := NewTxTracer()
+	chainConfig := params.MainnetChainConfig
+	vmConfig := vm.Config{Tracer: tt, Debug: true}
+	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil)
+	check(err)
+	blockNum := uint64(*block)
+	interrupt := false
+	for !interrupt {
+		block := bc.GetBlockByNumber(blockNum)
+		if block == nil {
+			break
+		}
+		dbstate := state.NewDbState(ethDb, block.NumberU64()-1)
+		statedb := state.New(dbstate)
+		signer := types.MakeSigner(chainConfig, block.Number())
+		for txIdx, tx := range block.Transactions() {
+			// Assemble the transaction call message and return if the requested offset
+			msg, _ := tx.AsMessage(signer)
+			context := core.NewEVMContext(msg, block.Header(), bc, nil)
+			// Not yet the searched for transaction, execute on top of the current state
+			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
+			tt.ResetCounters()
+			if _, usedGas, _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
+				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
+			} else {
+				neededGas := usedGas - tt.gasForSSTORE - tt.gasForCREATE - tt.gasForEthSendingCALL
+				fmt.Fprintf(w, "%d,%d,%d,%d\n", blockNum, txIdx, len(tx.Data()), neededGas)
+			}
+		}
+		blockNum++
+		if blockNum % 1000 == 0 {
+			fmt.Printf("Processed %d blocks\n", blockNum)
+		}
+		// Check for interrupts
+		select {
+		case interrupt = <-interruptCh:
+			fmt.Println("interrupted, please wait for cleanup...")
+		default:
+		}
+	}
+	fmt.Printf("Next time specify -block %d\n", blockNum)
+}
