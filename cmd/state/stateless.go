@@ -120,9 +120,9 @@ func stateless(genLag, consLag int) {
 		interruptCh <- true
 	}()
 
-	ethDb, err := ethdb.NewLDBDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
+	//ethDb, err := ethdb.NewLDBDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
 	//ethDb, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
-	//ethDb, err := ethdb.NewLDBDatabase("/home/akhounov/.ethereum/geth/chaindata1")
+	ethDb, err := ethdb.NewLDBDatabase("/home/akhounov/.ethereum/geth/chaindata1")
 	check(err)
 	defer ethDb.Close()
 	chainConfig := params.MainnetChainConfig
@@ -165,7 +165,7 @@ func stateless(genLag, consLag int) {
 	tds.SetResolveReads(false)
 	tds.SetNoHistory(true)
 	interrupt := false
-	var thresholdBlock uint64 = 2500000
+	var thresholdBlock uint64 = 0
 	//prev := make(map[uint64]*state.Stateless)
 	var proofGen *state.Stateless // Generator of proofs
 	var proofCons *state.Stateless // Consumer of proofs

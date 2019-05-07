@@ -26,8 +26,13 @@ type TxTracer struct {
 	currentBlock uint64
 	sinceAccounts map[common.Address]uint64
 	sinceStorage map[common.Address]map[common.Hash]uint64
+	created map[common.Address]struct{}
 	lastAccessedAccounts map[common.Address]uint64
 	lastAccessedStorage map[common.Address]map[common.Hash]uint64
+	measureCall bool
+	measureCreate bool
+	measureDepth int
+	measureCurrentGas uint64
 }
 
 func NewTxTracer() *TxTracer {
@@ -43,6 +48,7 @@ func (tt *TxTracer) ResetCounters() {
 	tt.gasForEthSendingCALL = 0
 	tt.sinceAccounts = make(map[common.Address]uint64)
 	tt.sinceStorage = make(map[common.Address]map[common.Hash]uint64)
+	tt.created = make(map[common.Address]struct{})
 }
 
 func (tt *TxTracer) CaptureStart(depth int, from common.Address, to common.Address, call bool, input []byte, gas uint64, value *big.Int) error {
@@ -91,6 +97,14 @@ func (tt *TxTracer) queryStorageAccess(account common.Address, storageKey common
 }
 
 func (tt *TxTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *vm.Stack, contract *vm.Contract, depth int, err error) error {
+	if tt.measureCall && tt.measureDepth + 1 == depth {
+		tt.gasForEthSendingCALL += (tt.measureCurrentGas - gas)
+	}
+	if tt.measureCreate && tt.measureDepth + 1 == depth {
+		tt.gasForCREATE += (tt.measureCurrentGas - gas)
+	}
+	tt.measureCall = false
+	tt.measureCreate = false
 	switch op {
 	case vm.SSTORE:
 		tt.gasForSSTORE += cost
@@ -98,16 +112,14 @@ func (tt *TxTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 		tt.markStorageAccess(contract.Address(), common.BigToHash(stack.Back(0)))
 	case vm.SLOAD:
 		tt.markStorageAccess(contract.Address(), common.BigToHash(stack.Back(0)))
-	case vm.CREATE:
-		tt.gasForCREATE += cost
-	case vm.CALL:
-		if stack.Len() >= 3 {
-			if stack.Back(2).Sign() > 0 { // top of the stack is "gas", then addr, then value
-				tt.gasForEthSendingCALL += cost
-			}
-			toAddress := common.BigToAddress(stack.Back(1))
-			tt.queryAccountAccess(toAddress)
-		}
+	case vm.CREATE, vm.CREATE2:
+		tt.measureCurrentGas = gas
+		tt.measureDepth = depth
+		tt.measureCreate = true
+	case vm.CALL, vm.CALLCODE, vm.DELEGATECALL, vm.STATICCALL:
+		tt.measureCurrentGas = gas
+		tt.measureDepth = depth
+		tt.measureCall = true
 	}
 	return nil
 }
@@ -118,8 +130,8 @@ func (tt *TxTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.
 	return nil
 }
 func (tt *TxTracer) CaptureCreate(creator common.Address, creation common.Address) error {
-	tt.queryAccountAccess(creation) // CLARIFICATION REQUIRED - does it make sense to measure how many blocks ago was the newly created contract accessed?
 	tt.markAccountAccess(creation)
+	tt.created[creation] = struct{}{}
 	return nil
 }
 func (tt *TxTracer) CaptureAccountRead(account common.Address) error {
@@ -161,6 +173,11 @@ func transaction_stats() {
 	defer fs.Close()
 	ws := bufio.NewWriter(fs)
 	defer ws.Flush()
+	fc, err := os.OpenFile("txs_created.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	check(err)
+	defer fc.Close()
+	wc := bufio.NewWriter(fc)
+	defer wc.Flush()
 	tt := NewTxTracer()
 	chainConfig := params.MainnetChainConfig
 	vmConfig := vm.Config{Tracer: tt, Debug: true}
@@ -183,11 +200,41 @@ func transaction_stats() {
 			// Not yet the searched for transaction, execute on top of the current state
 			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
 			tt.ResetCounters()
+			tt.currentBlock = blockNum
+			if tx.To() == nil {
+				tt.measureCreate = true
+				tt.measureCall = false
+			} else {
+				tt.measureCall = true
+				tt.measureCreate = false
+			}
+			tt.measureDepth = 0
+			tt.measureCurrentGas = tx.Gas()
 			if _, usedGas, _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
 			} else {
-				neededGas := usedGas - tt.gasForSSTORE - tt.gasForCREATE - tt.gasForEthSendingCALL
+				var neededGas uint64
+				if usedGas > tt.gasForSSTORE + tt.gasForCREATE + tt.gasForEthSendingCALL {
+					neededGas = usedGas - (tt.gasForSSTORE + tt.gasForCREATE + tt.gasForEthSendingCALL)
+				}
 				fmt.Fprintf(w, "%d,%d,%d,%d\n", blockNum, txIdx, len(tx.Data()), neededGas)
+				//
+				for account, since := range tt.sinceAccounts {
+					fmt.Fprintf(wa, "%d,%d,%x,%d\n", blockNum, txIdx, account, since)
+				}
+				//
+				for account, m := range tt.sinceStorage {
+					for storageKey, since := range m {
+						fmt.Fprintf(ws, "%d,%d,%x,%x,%d\n", blockNum, txIdx, account, storageKey, since)
+					}
+				}
+				//
+				for account := range tt.created {
+					size := len(statedb.GetCode(account))
+					if size > 0 {
+						fmt.Fprintf(wc, "%d,%d,%x,%d\n", blockNum, txIdx, account, size)
+					}
+				}
 			}
 		}
 		blockNum++
