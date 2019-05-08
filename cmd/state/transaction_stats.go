@@ -29,10 +29,10 @@ type TxTracer struct {
 	created map[common.Address]struct{}
 	lastAccessedAccounts map[common.Address]uint64
 	lastAccessedStorage map[common.Address]map[common.Hash]uint64
-	measureCall bool
 	measureCreate bool
 	measureDepth int
 	measureCurrentGas uint64
+	trace bool
 }
 
 func NewTxTracer() *TxTracer {
@@ -97,13 +97,9 @@ func (tt *TxTracer) queryStorageAccess(account common.Address, storageKey common
 }
 
 func (tt *TxTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost uint64, memory *vm.Memory, stack *vm.Stack, contract *vm.Contract, depth int, err error) error {
-	if tt.measureCall && tt.measureDepth + 1 == depth {
-		tt.gasForEthSendingCALL += (tt.measureCurrentGas - gas)
-	}
 	if tt.measureCreate && tt.measureDepth + 1 == depth {
 		tt.gasForCREATE += (tt.measureCurrentGas - gas)
 	}
-	tt.measureCall = false
 	tt.measureCreate = false
 	switch op {
 	case vm.SSTORE:
@@ -117,9 +113,14 @@ func (tt *TxTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 		tt.measureDepth = depth
 		tt.measureCreate = true
 	case vm.CALL, vm.CALLCODE, vm.DELEGATECALL, vm.STATICCALL:
-		tt.measureCurrentGas = gas
-		tt.measureDepth = depth
-		tt.measureCall = true
+		var callGas uint64
+		if stack.Len() > 0 {
+			callGas = stack.Back(0).Uint64()
+			tt.gasForEthSendingCALL += (cost - callGas)
+		}
+		if stack.Len() > 1 {
+			tt.queryAccountAccess(common.BigToAddress(stack.Back(1)))
+		}
 	}
 	return nil
 }
@@ -153,9 +154,9 @@ func transaction_stats() {
 		interruptCh <- true
 	}()
 
-	//ethDb, err := ethdb.NewLDBDatabase("/home/akhounov/.ethereum/geth/chaindata")
+	ethDb, err := ethdb.NewLDBDatabase("/home/akhounov/.ethereum/geth/chaindata")
 	//ethDb, err := ethdb.NewLDBDatabase("/Volumes/tb41/turbo-geth/geth/chaindata")
-	ethDb, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	//ethDb, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	check(err)
 	defer ethDb.Close()
 	f, err := os.OpenFile("txs.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
@@ -201,19 +202,15 @@ func transaction_stats() {
 			vmenv := vm.NewEVM(context, statedb, chainConfig, vmConfig)
 			tt.ResetCounters()
 			tt.currentBlock = blockNum
-			if tx.To() == nil {
-				tt.measureCreate = true
-				tt.measureCall = false
-			} else {
-				tt.measureCall = true
-				tt.measureCreate = false
-			}
+			tt.measureCreate = tx.To() == nil
 			tt.measureDepth = 0
 			tt.measureCurrentGas = tx.Gas()
+			tt.trace = (blockNum == 1279578) && (txIdx == 3)
 			if _, usedGas, _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
 			} else {
 				var neededGas uint64
+				usedGas += statedb.GetRefund()
 				if usedGas > tt.gasForSSTORE + tt.gasForCREATE + tt.gasForEthSendingCALL {
 					neededGas = usedGas - (tt.gasForSSTORE + tt.gasForCREATE + tt.gasForEthSendingCALL)
 				}
