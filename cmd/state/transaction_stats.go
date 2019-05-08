@@ -104,10 +104,14 @@ func (tt *TxTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 	switch op {
 	case vm.SSTORE:
 		tt.gasForSSTORE += cost
-		tt.queryStorageAccess(contract.Address(), common.BigToHash(stack.Back(0)))
-		tt.markStorageAccess(contract.Address(), common.BigToHash(stack.Back(0)))
+		if stack.Len() > 0 {
+			tt.queryStorageAccess(contract.Address(), common.BigToHash(stack.Back(0)))
+			tt.markStorageAccess(contract.Address(), common.BigToHash(stack.Back(0)))
+		}
 	case vm.SLOAD:
-		tt.markStorageAccess(contract.Address(), common.BigToHash(stack.Back(0)))
+		if stack.Len() > 0 {
+			tt.markStorageAccess(contract.Address(), common.BigToHash(stack.Back(0)))
+		}
 	case vm.CREATE, vm.CREATE2:
 		tt.measureCurrentGas = gas
 		tt.measureDepth = depth
