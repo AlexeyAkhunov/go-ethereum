@@ -197,7 +197,8 @@ func stateless(genLag, consLag int) {
 			statedb.Prepare(tx.Hash(), block.Hash(), i)
 			receipt, _, err := core.ApplyTransaction(chainConfig, bcb, nil, gp, statedb, tds.TrieStateWriter(), header, tx, usedGas, vmConfig)
 			if err != nil {
-				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
+				fmt.Printf("tx %x failed: %v\n", tx.Hash(), err)
+				return
 			}
 			if !chainConfig.IsByzantium(header.Number) {
 				//rootHash, err := tds.TrieRoot()
@@ -211,11 +212,13 @@ func stateless(genLag, consLag int) {
 		// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
 		_, err = engine.Finalize(chainConfig, header, statedb, block.Transactions(), block.Uncles(), receipts)
 		if err != nil {
-			panic(fmt.Errorf("Finalize of block %d failed: %v", blockNum, err))
+			fmt.Printf("Finalize of block %d failed: %v\n", blockNum, err)
+			return
 		}
 		nextRoot, err := tds.IntermediateRoot(statedb, chainConfig.IsEIP158(header.Number))
 		if err != nil {
-			panic(err)
+			fmt.Printf("Failed to calculate IntermediateRoot: %v\n", err)
+			return
 		}
 		//fmt.Printf("Next root %x\n", nextRoot)
 		if nextRoot != block.Root() {
@@ -224,10 +227,12 @@ func stateless(genLag, consLag int) {
 		tds.SetBlockNr(blockNum)
 		err = statedb.Commit(chainConfig.IsEIP158(header.Number), tds.DbStateWriter())
 		if err != nil {
-			panic(fmt.Errorf("Commiting block %d failed: %v", blockNum, err))
+			fmt.Errorf("Commiting block %d failed: %v", blockNum, err)
+			return
 		}
 		if _, err := batch.Commit(); err != nil {
-			panic(err)
+			fmt.Printf("Failed to commit batch: %v\n", err)
+			return
 		}
 		if (blockNum % 500000 == 0) || (blockNum > 5600000 && blockNum % 100000 == 0) {
 			//save_snapshot(db, fmt.Sprintf("state_%d", blockNum))
@@ -239,7 +244,7 @@ func stateless(genLag, consLag int) {
 				fmt.Printf("Error making state for block %d: %v\n", blockNum, err)
 			} else {
 				if err := runBlock(tds, dbstate, chainConfig, bcb, header, block, trace, true); err != nil {
-					fmt.Printf("Error running block %d through stateless0: %v", blockNum, err)
+					fmt.Printf("Error running block %d through stateless0: %v\n", blockNum, err)
 				} else {
 					writeStats(w, blockNum, blockProof)
 				}
@@ -260,25 +265,28 @@ func stateless(genLag, consLag int) {
 				if blockNum > uint64(consLag) {
 					pBlockProof := proofGen.ThinProof(blockProof, block.NumberU64()-1, blockNum - uint64(consLag), trace)
 					if err := proofCons.ApplyProof(preRoot, pBlockProof, block.NumberU64()-1, false); err != nil {
-						panic(err)
+						fmt.Printf("Error applying thin proof to consumer: %v\n")
+						return
 					}
 					writeStats(wf, blockNum, pBlockProof)
 					proofCons.Prune(blockNum - uint64(consLag), false)
 				} else {
 					if err := proofCons.ApplyProof(preRoot, blockProof, block.NumberU64()-1, false); err != nil {
-						panic(err)
+						fmt.Printf("Error applying proof to consumer: %v\n", err)
+						return
 					}
 				}
 				if err := runBlock(tds, proofCons, chainConfig, bcb, header, block, trace, false); err != nil {
-					fmt.Printf("Error running block %d through proof consumer: %v", blockNum, err)
+					fmt.Printf("Error running block %d through proof consumer: %v\n", blockNum, err)
 				}
 			}
 			if proofGen != nil {
 				if err := proofGen.ApplyProof(preRoot, blockProof, block.NumberU64()-1, false); err != nil {
-					panic(err)
+					fmt.Printf("Error applying proof to generator: %v\n", err)
+					return
 				}
 				if err := runBlock(tds, proofGen, chainConfig, bcb, header, block, trace, false); err != nil {
-					fmt.Printf("Error running block %d through proof generator: %v", blockNum, err)
+					fmt.Printf("Error running block %d through proof generator: %v'n", blockNum, err)
 				}
 				if blockNum > uint64(genLag) {
 					proofGen.Prune(blockNum - uint64(genLag), false)

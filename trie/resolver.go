@@ -9,7 +9,7 @@ import (
 	//"sync/atomic"
 	"math/big"
 	"runtime/debug"
-	"os"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -619,11 +619,12 @@ func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 	startkeys, fixedbits := tr.PrepareResolveParams()
 	var err error
 	if db == nil {
-		fmt.Fprintf(os.Stderr, "ResolveWithDb(db=nil), tr.acounts: %t\n", tr.accounts)
+		var b strings.Builder
+		fmt.Fprintf(&b, "ResolveWithDb(db=nil), tr.acounts: %t\n", tr.accounts)
 		for i, sk := range startkeys {
-			fmt.Fprintf(os.Stderr, "sk %x, bits: %d\n", sk, fixedbits[i])
+			fmt.Fprintf(&b, "sk %x, bits: %d\n", sk, fixedbits[i])
 		}
-		return fmt.Errorf("Unexpected resolution: %s", debug.Stack())
+		return fmt.Errorf("Unexpected resolution: %s at %s", b, debug.Stack())
 	}
 	if tr.accounts {
 		if tr.historical {

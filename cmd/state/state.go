@@ -1710,10 +1710,10 @@ func main() {
 		}
 		defer pprof.StopCPUProfile()
 	}
-	stateGrowth1()
-	stateGrowthChart1()
-	stateGrowth2()
-	stateGrowthChart2()
+	//stateGrowth1()
+	//stateGrowthChart1()
+	//stateGrowth2()
+	//stateGrowthChart2()
 	//stateGrowthChart3()
 	//makeCreators()
 	//stateGrowthChart4()
@@ -1738,7 +1738,7 @@ func main() {
 	//nakedSloadChart()
 	//nakedAccountChart()
 	//specExecChart1()
-	//stateless(*genLag, *consLag)
+	stateless(*genLag, *consLag)
 	//stateless_chart_key_values("stateless1.csv", []int{17}, "total.png", 1, 0)
 	//stateless_chart_key_values("stateless1_256.csv", []int{17}, "total256.png", 1, 0)
 	//stateless_chart_key_values([]int{17}, "total_2675000.png", 2675000, 0)
@@ -1758,5 +1758,5 @@ func main() {
 	//estimate()
 	//verify_snapshot()
 	//feemarket()
-	transaction_stats()
+	//transaction_stats()
 }
