@@ -1710,10 +1710,10 @@ func main() {
 		}
 		defer pprof.StopCPUProfile()
 	}
-	//stateGrowth1()
-	//stateGrowthChart1()
-	//stateGrowth2()
-	//stateGrowthChart2()
+	stateGrowth1()
+	stateGrowthChart1()
+	stateGrowth2()
+	stateGrowthChart2()
 	//stateGrowthChart3()
 	//makeCreators()
 	//stateGrowthChart4()
