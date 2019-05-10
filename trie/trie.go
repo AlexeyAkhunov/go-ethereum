@@ -1308,11 +1308,8 @@ func (t *Trie) NewContinuation(key []byte, pos int, resolveHash []byte) *TrieCon
 	return &TrieContinuation{t: t, key: key, resolveKey: key, resolvePos: pos, resolveHash: hashNode(resolveHash)}
 }
 
-func (tc *TrieContinuation) Print() {
-	fmt.Printf("tc{t:%x/%x,action:%d,key:%x,resolveKey:%x,resolvePos:%d}\n", tc.t.bucket, tc.t.prefix, tc.action, tc.key, tc.resolveKey, tc.resolvePos)
-	if tc.resolved != nil {
-		fmt.Printf("%s\n", tc.resolved)
-	}
+func (tc *TrieContinuation) String() string {
+	return fmt.Sprintf("tc{t:%x/%x,action:%d,key:%x,resolveKey:%x,resolvePos:%d}", tc.t.bucket, tc.t.prefix, tc.action, tc.key, tc.resolveKey, tc.resolvePos)
 }
 
 func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieContinuation, blockNr uint64) bool {

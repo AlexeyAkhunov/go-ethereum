@@ -444,7 +444,7 @@ func (s *Stateless) CheckRoot(expected common.Hash, check bool) error {
 				c = t.DeleteAction(keyHash[:])
 			}
 			if !c.RunWithDb(nil, s.blockNr-1) {
-				return fmt.Errorf("Unexpected resolution")
+				return fmt.Errorf("Unexpected resolution: %s\n", c.String())
 			}
 		}
 	}
@@ -481,7 +481,7 @@ func (s *Stateless) CheckRoot(expected common.Hash, check bool) error {
 			c = s.t.DeleteAction(addrHash[:])
 		}
 		if !c.RunWithDb(nil, s.blockNr-1) {
-			return fmt.Errorf("Unexpected resolution")
+			return fmt.Errorf("Unexpected resolution: %s\n", c.String())
 		}
 		if deleteStorageTrie {
 			delete(s.storageTries, addrHash)

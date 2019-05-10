@@ -250,7 +250,7 @@ func (tr *TrieResolver) AddContinuation(c *TrieContinuation) {
 
 func (tr *TrieResolver) Print() {
 	for _, c := range tr.continuations {
-		c.Print()
+		fmt.Printf("%s\n", c.String())
 	}
 }
 

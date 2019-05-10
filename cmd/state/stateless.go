@@ -286,7 +286,7 @@ func stateless(genLag, consLag int) {
 					return
 				}
 				if err := runBlock(tds, proofGen, chainConfig, bcb, header, block, trace, false); err != nil {
-					fmt.Printf("Error running block %d through proof generator: %v'n", blockNum, err)
+					fmt.Printf("Error running block %d through proof generator: %v\nn", blockNum, err)
 				}
 				if blockNum > uint64(genLag) {
 					proofGen.Prune(blockNum - uint64(genLag), false)
