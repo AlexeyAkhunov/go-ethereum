@@ -1149,9 +1149,9 @@ func storageUsage() {
 	for i := 0; i < iba.length; i++ {
 		cumulative += iba.ints[i]
 		if name, ok := names[iba.values[i]]; ok {
-			fmt.Fprintf(w, "%d,%s,%d,%.3f\n", i+1, name, iba.ints[i], 100.0*float64(cumulative)/float64(total))
+			fmt.Fprintf(w, "%d,%x,%s,%d,%.3f\n", i+1, iba.values[i], name, iba.ints[i], 100.0*float64(cumulative)/float64(total))
 		} else {
-			fmt.Fprintf(w, "%d,%x,%d,%.3f\n", i+1, iba.values[i], iba.ints[i], 100.0*float64(cumulative)/float64(total))
+			fmt.Fprintf(w, "%d,%x,,%d,%.3f\n", i+1, iba.values[i], iba.ints[i], 100.0*float64(cumulative)/float64(total))
 		}
 	}
 	fmt.Printf("Total storage items: %d\n", cumulative)
@@ -1710,15 +1710,15 @@ func main() {
 		}
 		defer pprof.StopCPUProfile()
 	}
-	stateGrowth1()
-	stateGrowthChart1()
-	stateGrowth2()
-	stateGrowthChart2()
+	//stateGrowth1()
+	//stateGrowthChart1()
+	//stateGrowth2()
+	//stateGrowthChart2()
 	//stateGrowthChart3()
 	//makeCreators()
 	//stateGrowthChart4()
 	//stateGrowthChart5()
-	//storageUsage()
+	storageUsage()
 	//oldStorage()
 	//dustEOA()
 	//dustChartEOA()
