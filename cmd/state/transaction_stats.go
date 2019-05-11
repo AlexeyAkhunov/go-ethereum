@@ -70,23 +70,20 @@ func (tt *TxTracer) markStorageAccess(account common.Address, storageKey common.
 }
 
 func (tt *TxTracer) queryAccountAccess(account common.Address) {
-	var q uint64
+	var q uint64 = tt.currentBlock
 	if blockNum, ok := tt.lastAccessedAccounts[account]; ok {
 		q = tt.currentBlock - blockNum
-	} else {
-		q = tt.currentBlock // CLARIFICATION REQUIRED - WHAT TO RETURN IF THIS IS THE FIRST ACCESS?
 	}
 	tt.sinceAccounts[account] = q
 }
 
 func (tt *TxTracer) queryStorageAccess(account common.Address, storageKey common.Hash) {
-	var q uint64
+	var q uint64 = tt.currentBlock
 	if m, ok1 := tt.lastAccessedStorage[account]; ok1 {
 		if blockNum, ok2 := m[storageKey]; ok2 {
 			q = tt.currentBlock - blockNum
 		}
 	}
-	q = tt.currentBlock // CLARIFICATION REQUIRED - WHAT TO RETURN IF THIS IS THE FIRST ACCESS?
 	if m, ok := tt.sinceStorage[account]; ok {
 		m[storageKey] = q
 	} else {
@@ -120,6 +117,9 @@ func (tt *TxTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 		var callGas uint64
 		if stack.Len() > 0 {
 			callGas = stack.Back(0).Uint64()
+			if callGas > gas {
+				callGas = gas
+			}
 			tt.gasForEthSendingCALL += (cost - callGas)
 		}
 		if stack.Len() > 1 {
