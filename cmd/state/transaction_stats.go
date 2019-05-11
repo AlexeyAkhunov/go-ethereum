@@ -100,7 +100,9 @@ func (tt *TxTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 	tt.measureCreate = false
 	switch op {
 	case vm.SSTORE:
-		tt.gasForSSTORE += cost
+		if cost <= gas {
+			tt.gasForSSTORE += cost
+		}
 		if stack.Len() > 0 {
 			tt.queryStorageAccess(contract.Address(), common.BigToHash(stack.Back(0)))
 			tt.markStorageAccess(contract.Address(), common.BigToHash(stack.Back(0)))
@@ -115,7 +117,7 @@ func (tt *TxTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 		tt.measureCreate = true
 	case vm.CALL, vm.CALLCODE, vm.DELEGATECALL, vm.STATICCALL:
 		var callGas uint64
-		if stack.Len() > 0 {
+		if stack.Len() > 0 && cost <= gas {
 			callGas = stack.Back(0).Uint64()
 			if callGas > gas {
 				callGas = gas
