@@ -223,12 +223,23 @@ func transaction_stats() {
 				fmt.Fprintf(w, "%d,%d,%d,%d\n", blockNum, txIdx, len(tx.Data()), neededGas)
 				//
 				for account, since := range tt.sinceAccounts {
-					fmt.Fprintf(wa, "%d,%d,%x,%d\n", blockNum, txIdx, account, since)
+					precompile := true
+					for i := 0; i < 19; i++ {
+						if account[i] != 0 {
+							precompile = false
+							break
+						}
+					}
+					if !precompile {
+						fmt.Fprintf(wa, "%d,%d,%x,%d\n", blockNum, txIdx, account, since)
+					}
 				}
 				//
 				for account, m := range tt.sinceStorage {
 					for storageKey, since := range m {
-						fmt.Fprintf(ws, "%d,%d,%x,%x,%d\n", blockNum, txIdx, account, storageKey, since)
+						if since != 0 {
+							fmt.Fprintf(ws, "%d,%d,%x,%x,%d\n", blockNum, txIdx, account, storageKey, since)
+						}
 					}
 				}
 				//
