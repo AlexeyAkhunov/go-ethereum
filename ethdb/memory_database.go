@@ -34,8 +34,6 @@ func NewMemDatabase() *LDBDatabase {
 		fn:  "in-memory",
 		db:  db,
 		log: logger,
-		hashfile: nil,
-		hashdata: make([]byte, HeapSize),
 	}
 }
 
@@ -51,7 +49,5 @@ func NewMemDatabase2() (*LDBDatabase, *bolt.DB) {
 		fn:  "in-memory",
 		db:  db,
 		log: logger,
-		hashfile: nil,
-		hashdata: make([]byte, HeapSize),
 	}, db
 }

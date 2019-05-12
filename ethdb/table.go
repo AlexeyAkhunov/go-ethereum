@@ -98,12 +98,3 @@ func (dt *table) NewBatch() Mutation {
 func (dt *table) Size() int {
 	return dt.db.Size()
 }
-
-func (dt *table) GetHash(index uint32) []byte {
-	return dt.db.GetHash(index)
-}
-
-func (dt *table) PutHash(index uint32, hash []byte) {
-	dt.db.PutHash(index, hash)
-}
-

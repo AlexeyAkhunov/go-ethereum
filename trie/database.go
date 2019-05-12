@@ -66,8 +66,6 @@ type DatabaseReader interface {
 	Has(bucket, key []byte) (bool, error)
 
 	Walk(bucket, key []byte, keybits uint, walker func([]byte, []byte) (bool, error)) error
-
-	GetHash(index uint32) []byte
 }
 
 // Database is an intermediate write layer between the trie data structures and

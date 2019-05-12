@@ -25,7 +25,6 @@ type Putter interface {
 	Put(bucket, key, value []byte) error
 	PutS(hBucket, key, value []byte, timestamp uint64) error
 	DeleteTimestamp(timestamp uint64) error
-	PutHash(index uint32, hash []byte)
 }
 
 type Getter interface {
@@ -37,7 +36,6 @@ type Getter interface {
 	MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) (bool, error)) error
 	WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error
 	MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) (bool, error)) error
-	GetHash(index uint32) []byte
 }
 
 // Deleter wraps the database delete operation supported by both batches and regular databases.

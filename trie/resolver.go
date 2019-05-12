@@ -2,11 +2,8 @@ package trie
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
 	"sort"
-	"time"
-	//"sync/atomic"
 	"math/big"
 	"runtime/debug"
 	"strings"
@@ -20,100 +17,6 @@ import (
 
 var emptyHash [32]byte
 
-// Verifies that hashes loaded from the hashfile match with the root
-func (t *Trie) rebuildFromHashes(dbr DatabaseReader) (root node, roothash hashNode) {
-	startTime := time.Now()
-	var vertical [7]*fullNode
-	var fillCount [7]int // couting number of children for determining whether we need fullNode, shortNode, or nothing
-	var lastFill [7]node
-	var lastFillIdx [7]byte
-	var lastFull [7]bool
-	var shorts [7]*shortNode
-	hasher := newHasher(t.encodeToBytes)
-	defer returnHasherToPool(hasher)
-	for i := 0; i < 16*1024*1024; i++ {
-		hashBytes := dbr.GetHash(uint32(i))
-		var hash node
-		hash = hashNode(hashBytes)
-		var short *shortNode
-		fullNodeHash := false
-		for level := 5; level >= 0; level-- {
-			var v int
-			switch level {
-			case 5:
-				v = i&0xf
-			case 4:
-				v = (i>>4)&0xf
-			case 3:
-				v = (i>>8)&0xf
-			case 2:
-				v = (i>>12)&0xf
-			case 1:
-				v = (i>>16)&0xf
-			case 0:
-				v = (i>>20)&0xf
-			}
-			if vertical[level] == nil {
-				vertical[level] = &fullNode{}
-				vertical[level].flags.dirty = true
-			}
-			if h, ok := hash.(hashNode); ok && bytes.Equal(h, emptyHash[:]) {
-				vertical[level].Children[v] = nil
-				vertical[level].flags.dirty = true
-			} else {
-				vertical[level].Children[v] = hash
-				vertical[level].flags.dirty = true
-				lastFill[level], hash = hash, nil
-				lastFillIdx[level] = byte(v)
-				lastFull[level], fullNodeHash = fullNodeHash, false
-				shorts[level], short = short, nil
-				fillCount[level]++
-			}
-			if v != 15 {
-				break
-			}
-			// We filled up 16 cells, check how many are not empty
-			if fillCount[level] == 0 {
-				hash = hashNode(emptyHash[:])
-				short = nil
-				fullNodeHash = false
-			} else if fillCount[level] == 1 {
-				if lastFull[level] {
-					// lastFill was a fullNode
-					short = &shortNode{Key: hexToCompact([]byte{lastFillIdx[level]}), Val: lastFill[level]}
-					short.flags.dirty = true
-					hash = short
-				} else if shorts[level] != nil {
-					// lastFill was a short node which needs to be extended
-					short = &shortNode{Key: hexToCompact(append([]byte{lastFillIdx[level]}, compactToHex(shorts[level].Key)...)), Val: shorts[level].Val}
-					short.flags.dirty = true
-					hash = short
-				} else {
-					hash = lastFill[level]
-				}
-				fullNodeHash = false
-			} else {
-				short = nil
-				shorts[level] = nil
-				hash = vertical[level]
-				fullNodeHash = true
-			}
-			lastFill[level] = nil
-			lastFull[level] = false
-			fillCount[level] = 0
-			vertical[level] = nil
-			if level == 0 {
-				root = hash
-			}
-		}
-	}
-	var rootHash common.Hash
-	if root != nil {
-		hasher.hash(root, true, rootHash[:])
-	}
-	log.Debug(fmt.Sprintf("rebuildFromHashes took %v\n", time.Since(startTime)))
-	return root, hashNode(rootHash[:])
-}
 
 func (t *Trie) Rebuild(db ethdb.Database, blockNr uint64) hashNode {
 	if t.root == nil {
@@ -123,26 +26,15 @@ func (t *Trie) Rebuild(db ethdb.Database, blockNr uint64) hashNode {
 	if !ok {
 		panic("Expected hashNode")
 	}
-	root, roothash := t.rebuildFromHashes(db)
+	root, roothash, err := t.rebuildHashes(db, nil, 0, blockNr, true, n)
+	if err != nil {
+		panic(err)
+	}
 	if bytes.Equal(roothash, n) {
 		t.root = root
-		log.Info("Successfuly loaded from hashfile", "root hash", roothash)
+		log.Info("Rebuilt hashfile and verified", "root hash", roothash)
 	} else {
-		empty := common.Hash{}
-		for i := 0; i < ethdb.HeapSize/32; i++ {
-			db.PutHash(uint32(i), empty[:])
-		}
-		_, hn, err := t.rebuildHashes(db, nil, 0, blockNr, true, n)
-		if err != nil {
-			panic(err)
-		}
-		root, roothash = t.rebuildFromHashes(db)
-		if bytes.Equal(roothash, hn) {
-			t.root = root
-			log.Info("Rebuilt hashfile and verified", "root hash", roothash)
-		} else {
-			log.Error(fmt.Sprintf("Could not rebuild %s vs %s\n", roothash, hn))
-		}
+		log.Error(fmt.Sprintf("Could not rebuild %s vs %s\n", roothash, n))
 	}
 	t.timestampSubTree(t.root, blockNr)
 	return roothash
@@ -412,21 +304,10 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 	for level := startLevel; level >= stopLevel; level-- {
 		keynibble := hex[level]
 		onResolvingPath := level <= rhPrefixLen // <= instead of < to be able to resolve deletes in one go
-		var hashIdx uint32
-		if tr.hashes && level <= 5 {
-			hashIdx = binary.BigEndian.Uint32(tr.key[:4]) >> 8
-		}
 		if tr.fillCount[level+1] == 1 {
 			// Short node, needs to be promoted to the level above
 			short := &tr.nodeStack[level+1]
-			var storeHashTo common.Hash
-			//short.flags.dirty = true
-			hashLen := tr.h.hash(short, false, storeHashTo[:])
-			if onResolvingPath || hashLen < 32 {
-				tr.vertical[level].Children[keynibble] = short.copy()
-			} else {
-				tr.vertical[level].Children[keynibble] = hashNode(storeHashTo[:])
-			}
+			tr.vertical[level].Children[keynibble] = short.copy()
 			tr.vertical[level].flags.dirty = true
 			if tr.fillCount[level] == 0 {
 				tr.nodeStack[level].Key = hexToCompact(append([]byte{keynibble}, compactToHex(short.Key)...))
@@ -434,9 +315,6 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 				tr.nodeStack[level].flags.dirty = true
 			}
 			tr.fillCount[level]++
-			if tr.hashes && level <= 5 && compactLen(short.Key) + level >= 5 {
-				tr.dbw.PutHash(hashIdx, storeHashTo[:])
-			}
 			if level >= tc.extResolvePos {
 				tr.nodeStack[level+1].Key = nil
 				tr.nodeStack[level+1].Val = nil
@@ -461,10 +339,7 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 			tr.nodeStack[level].flags.dirty = true
 		}
 		tr.vertical[level].flags.dirty = true
-		if tr.hashes && level == 5 {
-			tr.dbw.PutHash(hashIdx, storeHashTo[:])
-		}
-		if onResolvingPath {
+		if onResolvingPath || (tr.hashes && level == 5) {
 			var c node
 			if tr.fillCount[level+1] == 2 {
 				c = full.duoCopy()

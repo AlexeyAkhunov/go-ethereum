@@ -1,4 +1,4 @@
-// Copyright 2014 The go-ethereum Authors
+// Copyright 2018 The go-ethereum Authors
 // This file is part of the go-ethereum library.
 //
 // The go-ethereum library is free software: you can redistribute it and/or modify
@@ -14,8 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-// +build !js
-
+// Package database defines the interfaces for an Ethereum data store.
 package ethdb
 
 import (
@@ -32,7 +31,6 @@ import (
 
 	"github.com/boltdb/bolt"
 	"github.com/petar/GoLLRB/llrb"
-)
 
 var OpenFileLimit = 64
 var ErrKeyNotFound = errors.New("boltdb: key not found in range")
@@ -48,6 +46,41 @@ type LDBDatabase struct {
 	quitChan chan chan error // Quit channel to stop the metrics collection before closing the database
 
 	log log.Logger // Contextual logger tracking the database path
+
+	hashfile     *os.File
+	hashdata     []byte
+}
+
+func openHashFile(file string) (*os.File, []byte, error) {
+	hashfile, err := os.OpenFile(file+".hash", os.O_RDWR|os.O_CREATE, 0600)
+	if err != nil {
+		return nil, nil, err
+	}
+	stat, err := hashfile.Stat()
+	if err != nil {
+		hashfile.Close()
+		return nil, nil, err
+	}
+	if stat.Size() < HeapSize {
+		var buf [4096]byte
+		for i := 0; i < HeapSize; i+=len(buf) {
+			if _, err := hashfile.Write(buf[:]); err != nil {
+				hashfile.Close()
+				return nil, nil, err
+			}
+		}
+	} else if stat.Size() > HeapSize {
+		if err := hashfile.Truncate(HeapSize); err != nil {
+			hashfile.Close()
+			return nil, nil, err
+		}
+	}
+	hashdata, err := mmap(hashfile, HeapSize)
+	if err != nil {
+		hashfile.Close()
+		return nil, nil, err
+	}
+	return hashfile, hashdata, nil
 }
 
 // NewLDBDatabase returns a LevelDB wrapped object.
@@ -56,6 +89,10 @@ func NewLDBDatabase(file string) (*LDBDatabase, error) {
 
 	// Create necessary directories
 	if err := os.MkdirAll(path.Dir(file), os.ModePerm); err != nil {
+		return nil, err
+	}
+	hashfile, hashdata, err := openHashFile(file)
+	if err != nil {
 		return nil, err
 	}
 	// Open the db and recover any potential corruptions
@@ -68,6 +105,8 @@ func NewLDBDatabase(file string) (*LDBDatabase, error) {
 		fn:  file,
 		db:  db,
 		log: logger,
+		hashfile: hashfile,
+		hashdata: hashdata,
 	}, nil
 }
 
@@ -652,11 +691,31 @@ func (db *LDBDatabase) DeleteBucket(bucket []byte) error {
 	return err
 }
 
+func (db *LDBDatabase) GetHash(index uint32) []byte {
+	hash := make([]byte, 32)
+	copy(hash, db.hashdata[32*index:32*index+32])
+	return hash
+}
+
+func (db *LDBDatabase) PutHash(index uint32, hash []byte) {
+	copy(db.hashdata[32*index:], hash[:32])
+}
+
 func (db *LDBDatabase) Close() {
 	// Stop the metrics collection to avoid internal database races
 	db.quitLock.Lock()
 	defer db.quitLock.Unlock()
 
+	var err error
+	if db.hashfile != nil {
+		err = db.hashfile.Close()
+		if err == nil {
+			db.log.Info("Hashfile closed")
+		} else {
+			db.log.Error("Failed to close hashfile", "err", err)
+		}
+		db.hashfile = nil
+	}
 	if db.quitChan != nil {
 		errc := make(chan error)
 		db.quitChan <- errc
@@ -665,7 +724,8 @@ func (db *LDBDatabase) Close() {
 		}
 		db.quitChan = nil
 	}
-	if err := db.db.Close(); err == nil {
+	err = db.db.Close()
+	if err == nil {
 		db.log.Info("Database closed")
 	} else {
 		db.log.Error("Failed to close database", "err", err)
@@ -681,9 +741,14 @@ func (a *PutItem) Less(b llrb.Item) bool {
 	return bytes.Compare(a.key, bi.key) < 0
 }
 
+type Hash struct {
+	hash [32]byte
+}
+
 type mutation struct {
 	puts map[string]*llrb.LLRB // Map buckets to RB tree containing items
 	suffixkeys map[uint64]map[string][][]byte
+	hashes map[uint32]Hash
 	mu sync.RWMutex
 	db Database
 }
@@ -693,6 +758,7 @@ func (db *LDBDatabase) NewBatch() Mutation {
 		db: db,
 		puts: make(map[string]*llrb.LLRB),
 		suffixkeys: make(map[uint64]map[string][][]byte),
+		hashes: make(map[uint32]Hash),
 	}
 	return m
 }
@@ -1092,6 +1158,10 @@ func (m *mutation) Commit() (uint64, error) {
 		return 0, putErr
 	}
 	m.puts = make(map[string]*llrb.LLRB)
+	for index, h := range m.hashes {
+		m.db.PutHash(index, h.hash[:])
+	}
+	m.hashes = make(map[uint32]Hash)
 	return written, nil
 }
 
@@ -1100,6 +1170,8 @@ func (m *mutation) Rollback() {
 	defer m.mu.Unlock()
 	m.suffixkeys = make(map[uint64]map[string][][]byte)
 	m.puts = make(map[string]*llrb.LLRB)
+	m.hashes = make(map[uint32]Hash)
+>>>>>>> 86002ee91... All optimisations combined (to be picked apart later)
 }
 
 func (m *mutation) Keys() [][]byte {
@@ -1132,8 +1204,27 @@ func (m *mutation) NewBatch() Mutation {
 	mm := &mutation{
 		db: m,
 		puts: make(map[string]*llrb.LLRB),
+		hashes: make(map[uint32]Hash),
 		suffixkeys: make(map[uint64]map[string][][]byte),
 	}
 	return mm
 }
 
+var emptyHash [32]byte
+
+func (m *mutation) GetHash(index uint32) []byte {
+	h, ok := m.hashes[index]
+	if ok {
+		return h.hash[:]
+	}
+	if m.db == nil {
+		return emptyHash[:]
+	}
+	return m.db.GetHash(index)
+}
+
+func (m *mutation) PutHash(index uint32, hash []byte) {
+	var h Hash
+	copy(h.hash[:], hash)
+	m.hashes[index] = h
+}

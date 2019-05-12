@@ -350,7 +350,7 @@ func (s *Stateless) ReadAccountStorage(address common.Address, key *common.Hash)
 	h.sha.Write(address[:])
 	var addrHash common.Hash
 	h.sha.Read(addrHash[:])
-	t, err := s.getStorageTrie(common.Address{}, addrHash, false)
+	t, err := s.getStorageTrie(address, addrHash, false)
 	if err != nil {
 		return nil, err
 	}

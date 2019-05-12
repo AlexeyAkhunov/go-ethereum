@@ -265,7 +265,7 @@ func stateless(genLag, consLag int) {
 				if blockNum > uint64(consLag) {
 					pBlockProof := proofGen.ThinProof(blockProof, block.NumberU64()-1, blockNum - uint64(consLag), trace)
 					if err := proofCons.ApplyProof(preRoot, pBlockProof, block.NumberU64()-1, false); err != nil {
-						fmt.Printf("Error applying thin proof to consumer: %v\n")
+						fmt.Printf("Error applying thin proof to consumer: %v\n", err)
 						return
 					}
 					writeStats(wf, blockNum, pBlockProof)

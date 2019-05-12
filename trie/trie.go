@@ -7,7 +7,7 @@
 // (at your option) any later version.
 //
 // The go-ethereum library is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// but WITHOUT ANY WARRANTY; without even the implied warranty off
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
@@ -743,155 +743,6 @@ func (t *Trie) TryGet(db ethdb.Database, key []byte, blockNr uint64) (value []by
 	return value, err
 }
 
-func (t *Trie) emptyShortHash(db ethdb.Database, n *shortNode, level int, index uint32) {
-	if compactLen(n.Key) + level < 6 {
-		return
-	}
-	hexKey := compactToHex(n.Key)
-	hashIdx := index
-	for i := 0; i < 6-level; i++ {
-		hashIdx = (hashIdx<<4)+uint32(hexKey[i])
-	}
-	//fmt.Printf("emptyShort %d %x\n", level, hashIdx)
-	db.PutHash(hashIdx, emptyHash[:])
-}
-
-func (t *Trie) emptyFullHash(db ethdb.Database, level int, index uint32) {
-	if level != 6 {
-		return
-	}
-	//fmt.Printf("emptyFull %d %x\n", level, index)
-	db.PutHash(index, emptyHash[:])
-}
-
-func calcIndex(key []byte, pos int) uint32 {
-	var index uint32
-	for i := 0; i < pos; i++ {
-		index = (index << 4) + uint32(key[i])
-	}
-	return index
-}
-
-// Touching the node removes it from the nodeList
-func (t *Trie) touch(db ethdb.Database, n node, key []byte, pos int) {
-	if t.resolveReads {
-		return
-	}
-	if n == nil {
-		return
-	}
-	// Zeroing out the places in the hashes
-	if db == nil {
-		return
-	}
-	if key == nil {
-		return
-	}
-	if pos > 6 {
-		return
-	}
-	if !t.accounts {
-		return
-	}
-	switch n := (n).(type) {
-	case *shortNode:
-		t.emptyShortHash(db, n, pos, calcIndex(key, pos))
-	case *duoNode:
-		t.emptyFullHash(db, pos, calcIndex(key, pos))
-	case *fullNode:
-		t.emptyFullHash(db, pos, calcIndex(key, pos))
-	}
-}
-
-func (t *Trie) saveShortHash(db ethdb.Database, n *shortNode, level int, index uint32, h *hasher) bool {
-	if !t.accounts {
-		return false
-	}
-	if level > 6 {
-		return false
-	}
-	//fmt.Printf("saveShort(pre) %d\n", level)
-	if compactLen(n.Key) + level < 6 {
-		return true
-	}
-	hexKey := compactToHex(n.Key)
-	hashIdx := index
-	for i := 0; i < 6-level; i++ {
-		hashIdx = (hashIdx<<4)+uint32(hexKey[i])
-	}
-	//fmt.Printf("saveShort %d %x %s\n", level, hashIdx, hash)
-	db.PutHash(hashIdx, n.hash())
-	return false
-}
-
-func (t *Trie) saveFullHash(db ethdb.Database, n node, level int, hashIdx uint32, h *hasher) bool {
-	if !t.accounts {
-		return false
-	}
-	if level > 6 {
-		return false
-	}
-	if level < 6 {
-		return true
-	}
-	//fmt.Printf("saveFull %d %x %s\n", level, hashIdx, hash)
-	db.PutHash(hashIdx, n.hash())
-	return false
-}
-
-func (t *Trie) saveHashes(db ethdb.Database, n node, level int, index uint32, h *hasher, blockNr uint64) {
-	if db == nil {
-		return
-	}
-	switch n := (n).(type) {
-	case *shortNode:
-		if n.flags.t < blockNr {
-			return
-		}
-		// First re-add the child, then self
-		if !t.saveShortHash(db, n, level, index, h) {
-			return
-		}
-		index1 := index
-		level1 := level
-		for _, i := range compactToHex(n.Key) {
-			if i < 16 {
-				index1 = (index1<<4)+uint32(i)
-				level1++
-			}
-		}
-		t.saveHashes(db, n.Val, level1, index1, h, blockNr)
-	case *duoNode:
-		if n.flags.t < blockNr {
-			return
-		}
-		if !t.saveFullHash(db, n, level, index, h) {
-			return
-		}
-		i1, i2 := n.childrenIdx()
-		t.saveHashes(db, n.child1, level+1, (index<<4)+uint32(i1), h, blockNr)
-		t.saveHashes(db, n.child2, level+1, (index<<4)+uint32(i2), h, blockNr)
-	case *fullNode:
-		if n.flags.t < blockNr {
-			return
-		}
-		// First re-add children, then self
-		if !t.saveFullHash(db, n, level, index, h) {
-			return
-		}
-		for i := 0; i<=16; i++ {
-			if n.Children[i] != nil {
-				t.saveHashes(db, n.Children[i], level+1, (index<<4)+uint32(i), h, blockNr)
-			}
-		}
-	case hashNode:
-		if level == 6 {
-			//fmt.Printf("saveHash %x %s\n", index, n)
-			db.PutHash(index, n)
-		}
-	}
-}
-
 func (t *Trie) tryGet(dbr DatabaseReader, origNode node, key []byte, pos int, blockNr uint64) (value []byte, err error) {
 	if t.historical {
 		value, err = dbr.GetAsOf(t.bucket[1:], t.bucket, append(t.prefix, key...), blockNr)
@@ -1058,8 +909,6 @@ func (t *Trie) TryUpdate(db ethdb.Database, key, value []byte, blockNr uint64) e
 			return err
 		}
 	}
-	t.Hash()
-	t.SaveHashes(db, blockNr)
 	return nil
 }
 
@@ -1074,14 +923,6 @@ func (t *Trie) UpdateAction(key, value []byte) *TrieContinuation {
 		tc.action = TrieActionDelete
 	}
 	return &tc
-}
-
-func (t *Trie) SaveHashes(db ethdb.Database, blockNr uint64) {
-	if t.accounts {
-		h := newHasher(t.encodeToBytes)
-		defer returnHasherToPool(h)
-		t.saveHashes(db, t.root, 0, 0, h, blockNr)
-	}
 }
 
 func (t *Trie) Print(w io.Writer) {
@@ -1267,10 +1108,6 @@ func (tc *TrieContinuation) RunWithDb(db ethdb.Database, blockNr uint64) bool {
 		done = tc.t.delete(tc.t.root, tc.key, 0, tc, blockNr)
 	}
 	if tc.updated {
-		for _, touch := range tc.touched {
-			tc.t.touch(db, touch.n, touch.key, touch.pos)
-		}
-		tc.touched = []Touch{}
 		tc.t.root = tc.n
 	}
 	return done
@@ -1282,12 +1119,6 @@ const (
 	TrieActionInsert = iota
 	TrieActionDelete
 )
-
-type Touch struct {
-	n node
-	key []byte
-	pos int
-}
 
 type TrieContinuation struct {
 	t *Trie              // trie to act upon
@@ -1301,7 +1132,6 @@ type TrieContinuation struct {
 	resolved node        // Node that has been resolved via Database access
 	n node               // Returned node after the operation is complete
 	updated bool         // Whether the trie was updated
-	touched []Touch      // Nodes touched during the operation, by level
 }
 
 func (t *Trie) NewContinuation(key []byte, pos int, resolveHash []byte) *TrieContinuation {
@@ -1313,7 +1143,6 @@ func (tc *TrieContinuation) String() string {
 }
 
 func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieContinuation, blockNr uint64) bool {
-	c.touched = append(c.touched, Touch{n: origNode, key: key, pos: pos})
 	if len(key) == pos {
 		if v, ok := origNode.(valueNode); ok {
 			if t.resolveReads {
@@ -1330,7 +1159,6 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieCon
 		} else if t.resolveReads {
 			t.addSoleHash(t.prefix, key, pos, common.BytesToHash(origNode.hash()))
 		}
-		c.touched = append(c.touched, Touch{n: value, key: key, pos: pos})
 		c.updated = true
 		c.n = value
 		return true
@@ -1672,29 +1500,13 @@ func (t *Trie) convertToShortNode(key []byte, keyStart int, child node, pos uint
 		rkey := make([]byte, keyStart+1)
 		copy(rkey, key[:keyStart])
 		rkey[keyStart] = byte(pos)
-		if childHash, ok := child.(hashNode); ok {
-			if c.resolved == nil || !bytes.Equal(rkey, c.resolveKey) || keyStart+1 != c.resolvePos {
-				// It is either unresolved or resolved by other request
-				c.resolved = nil
-				c.resolveKey = rkey
-				c.resolvePos = keyStart+1
-				c.resolveHash = common.CopyBytes(childHash)
-				return false // Need resolution
-			}
-			cnode = c.resolved
-			t.timestampSubTree(cnode, blockNr)
-			c.resolved = nil
-			c.resolveKey = nil
-			c.resolvePos = 0
-		}
-		if short, ok := cnode.(*shortNode); ok {
-			c.touched = append(c.touched, Touch{n: short, key: rkey, pos: keyStart+1})
+		if short, ok := child.(*shortNode); ok {
 			cnodeKey := compactToHex(short.Key)
-			k := append([]byte{byte(pos)}, cnodeKey...)
+			k := make([]byte, len(cnodeKey)+1)
+			k[0] = byte(pos)
+			copy(k[1:], cnodeKey)
 			if t.resolveReads {
-				//fmt.Printf("addShort %x: %x\n", rkey, cnodeKey)
 				if t.addShort(t.prefix, rkey, keyStart+1, cnodeKey) {
-					//fmt.Printf("done\n")
 				}
 				t.createShort(t.prefix, key, keyStart)
 			}
@@ -1719,45 +1531,6 @@ func (t *Trie) convertToShortNode(key []byte, keyStart int, child node, pos uint
 				}
 			}
 			return done
-		} else {
-			switch n := cnode.(type) {
-			case *duoNode:
-				if t.resolveReads {
-					mask, hashes, m := n.hashesExcept(17)
-					t.addProof(t.prefix, rkey, keyStart+1, mask, hashes)
-					if m != nil {
-						for idx, s := range m {
-							nKey := compactToHex(s.Key)
-							proofKey := make([]byte, keyStart+2+len(nKey))
-							copy(proofKey, rkey[:keyStart+1])
-							proofKey[keyStart+1] = idx
-							copy(proofKey[keyStart+2:], nKey)
-							if t.addShort(t.prefix, proofKey, keyStart+2, nKey) {
-								t.addValue(t.prefix, proofKey, keyStart+2+len(nKey), common.CopyBytes(s.Val.(valueNode)))
-							}
-						}
-					}
-				}
-			case *fullNode:
-				if t.resolveReads {
-					mask, hashes, m := n.hashesExcept(17)
-					t.addProof(t.prefix, rkey, keyStart+1, mask, hashes)
-					if m != nil {
-						for idx, s := range m {
-							nKey := compactToHex(s.Key)
-							proofKey := make([]byte, keyStart+2+len(nKey))
-							copy(proofKey, rkey[:keyStart+1])
-							proofKey[keyStart+1] = idx
-							copy(proofKey[keyStart+2:], nKey)
-							if t.addShort(t.prefix, proofKey, keyStart+2, nKey) {
-								t.addValue(t.prefix, proofKey, keyStart+2+len(nKey), common.CopyBytes(s.Val.(valueNode)))
-							}
-						}
-					}
-				}
-			default:
-				panic("")
-			}
 		}
 	}
 	// Otherwise, n is replaced by a one-nibble short node
@@ -1772,19 +1545,6 @@ func (t *Trie) convertToShortNode(key []byte, keyStart int, child node, pos uint
 	newshort.adjustTod(blockNr)
 	c.updated = true
 	c.n = newshort
-	/*
-	if t.resolveReads && done {
-		t.addShort(t.prefix, key, keyStart, []byte{byte(pos)})
-		proofKey := make([]byte, len(key))
-		copy(proofKey, key[:keyStart])
-		proofKey[keyStart] = byte(pos)
-		if v, isValue := newshort.Val.(valueNode); isValue {
-			t.addValue(t.prefix, proofKey, keyStart+1, v)
-		} else {
-			t.addProof(t.prefix, proofKey, keyStart+1, uint32(0), []common.Hash{})
-		}
-	}
-	*/
 	return done
 }
 
@@ -1792,7 +1552,6 @@ func (t *Trie) convertToShortNode(key []byte, keyStart int, child node, pos uint
 // It reduces the trie to minimal form by simplifying
 // nodes on the way up after deleting recursively.
 func (t *Trie) delete(origNode node, key []byte, keyStart int, c *TrieContinuation, blockNr uint64) bool {
-	c.touched = append(c.touched, Touch{n: origNode, key: key, pos: keyStart})
 	switch n := origNode.(type) {
 	case *shortNode:
 		n.updateT(blockNr, t.joinGeneration, t.leftGeneration)
@@ -1844,7 +1603,6 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, c *TrieContinuati
 						newnode.adjustTod(blockNr)
 						// We do not increase generation count here, because one short node comes, but another one 
 						t.leftGeneration(shortChild.flags.t) // But shortChild goes away
-						c.touched = append(c.touched, Touch{n: shortChild, key: key, pos: keyStart+len(nKey)})
 						c.n = newnode
 					} else {
 						n.Val = child
@@ -1923,9 +1681,6 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, c *TrieContinuati
 						done = true
 					} else {
 						done = t.convertToShortNode(key, keyStart, n.child1, uint(i1), c, blockNr, done)
-						//if trace {
-						//	fmt.Printf("i2, converting to short node, done: %t, keyStart %d\n", done, keyStart)
-						//}
 					}
 				}
 				if nn != nil || (nn == nil && !done) {
@@ -2185,24 +1940,6 @@ func unloadOlderThan(key []byte, n node, gen uint64, h *hasher, isRoot bool, tra
 	}
 	switch n := (n).(type) {
 	case *shortNode:
-		if n.flags.t < gen {
-			if n.flags.dirty {
-				var hn common.Hash
-				if h.hash(n, isRoot, hn[:]) == 32 {
-					if trace {
-						fmt.Printf("unloaded key %x\n", key)
-					}
-					return hashNode(hn[:]), true
-				} else {
-					// Embedded node does not have a hash and cannot be unloaded
-					return nil, false
-				}
-			}
-			if trace {
-				fmt.Printf("unloaded key %x, t=%d, gen=%d\n", key, n.flags.t, gen)
-			}
-			return hashNode(common.CopyBytes(n.hash())), true
-		}
 		if n.flags.tod < gen {
 			var nextKey []byte
 			if trace {

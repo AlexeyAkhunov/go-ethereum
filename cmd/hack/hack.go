@@ -857,7 +857,7 @@ func testResolve() {
 		fmt.Printf("%v\n", err)
 	}
 	fmt.Printf("Took %v\n", time.Since(startTime))
-	tc.Print()
+	fmt.Printf("%s\n", tc)
 }
 
 func hashFile() {
@@ -1075,7 +1075,7 @@ func preimage() {
 	//ethDb, err := ethdb.NewLDBDatabase("/home/akhounov/.ethereum/geth/chaindata")
 	check(err)
 	defer ethDb.Close()
-	p, err := ethDb.Get(trie.SecureKeyPrefix, common.FromHex("0x0aa7e328fab5152555532c190888ee0590b43e480ea792b1f671c0d7c0e99e57"))
+	p, err := ethDb.Get(trie.SecureKeyPrefix, common.FromHex("0x2a23229958e691340d70ce446e3f3986df5f5289bbe763257e9c2321f7404f87"))
 	check(err)
 	fmt.Printf("%x\n", p)
 }
@@ -1533,14 +1533,14 @@ func main() {
  	//testRedis()
  	//upgradeBlocks()
  	//compareTries()
- 	invTree("root", "right", "diff", *block, false)
+ 	//invTree("root", "right", "diff", *block, false)
  	//invTree("iw", "ir", "id", *block, true)
  	//loadAccount()
  	//preimage()
  	//printBranches(uint64(*block))
  	//execToBlock(*block)
  	//extractTrie(*block)
- 	//fmt.Printf("%x\n", crypto.Keccak256(common.FromHex("0x8d12a197cb00d4747a1fe03395095ce2a5cc6819")))
+ 	fmt.Printf("%x\n", crypto.Keccak256(common.FromHex("0x040c0668aebe0bc41be1f70ebbed671dfdcd118be767a1ad6f78861c5e81abfc")))
  	//repair()
  	//readAccount()
  	//repairCurrent()

@@ -669,9 +669,6 @@ func (tds *TrieDbState) trieRoot(forward bool) (common.Hash, error) {
 		fmt.Printf("Resolved in %d iterations\n", it)
 	}
 	hash := tds.t.Hash()
-	if !tds.resolveReads && !tds.noHistory {
-		tds.t.SaveHashes(tds.db, tds.blockNr)
-	}
 	return hash, nil
 }
 
