@@ -235,7 +235,7 @@ func transaction_stats() {
 							break
 						}
 					}
-					if !precompile {
+					if !precompile && since != 0 {
 						fmt.Fprintf(wa, "%d,%d,%x,%d\n", blockNum, txIdx, account, since)
 					}
 				}
