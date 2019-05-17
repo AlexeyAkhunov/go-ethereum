@@ -52,6 +52,7 @@ func (tt *TxTracer) ResetCounters() {
 }
 
 func (tt *TxTracer) CaptureStart(depth int, from common.Address, to common.Address, call bool, input []byte, gas uint64, value *big.Int) error {
+	tt.queryAccountAccess(to)
 	return nil
 }
 
@@ -126,6 +127,10 @@ func (tt *TxTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost
 		}
 		if stack.Len() > 1 {
 			tt.queryAccountAccess(common.BigToAddress(stack.Back(1)))
+		}
+	case vm.SELFDESTRUCT:
+		if stack.Len() > 0 {
+			tt.queryAccountAccess(common.BigToAddress(stack.Back(0)))
 		}
 	}
 	return nil

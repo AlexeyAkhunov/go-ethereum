@@ -1760,4 +1760,5 @@ func main() {
 	//verify_snapshot()
 	//feemarket()
 	transaction_stats()
+	//naked_storage_vs_blockproof()
 }

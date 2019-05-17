@@ -13,6 +13,7 @@ import (
 	"encoding/csv"
 
 	"github.com/wcharczuk/go-chart"
+	"github.com/wcharczuk/go-chart/drawing"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
@@ -399,4 +400,148 @@ func nakedSloadChart() {
 	check(err)
 	err = ioutil.WriteFile("naked_sloads.png", buffer.Bytes(), 0644)
     check(err)
+}
+
+func naked_storage_vs_blockproof() {
+	swrFile, err := os.Open("/Volumes/tb41/turbo-geth/storage_read_writes.csv")
+	check(err)
+	defer swrFile.Close()
+	swrReader := csv.NewReader(bufio.NewReader(swrFile))
+	var blocks []float64
+	var totalSstores []float64
+	var nakedSstores []float64
+	var totalSloads []float64
+	var nakedSloads []float64
+	var totalNaked []float64
+	for records, _ := swrReader.Read(); records != nil; records, _ = swrReader.Read() {
+		blocks = append(blocks, parseFloat64(records[0])/1000000.0)
+		totalSstores = append(totalSstores, parseFloat64(records[1]))
+		nakedSstores = append(nakedSstores, parseFloat64(records[2]))
+		totalSloads = append(totalSloads, parseFloat64(records[3]))
+		nakedSloads = append(nakedSloads, parseFloat64(records[4]))
+		totalNaked = append(totalNaked, parseFloat64(records[2]) + parseFloat64(records[4]))
+	}
+
+	file, err := os.Open("/Volumes/tb41/turbo-geth/stateless.csv")
+	check(err)
+	defer file.Close()
+	reader := csv.NewReader(bufio.NewReader(file))
+	var blocks2 []float64
+	var vals [18][]float64
+	for records, _ := reader.Read(); records != nil; records, _ = reader.Read() {
+		if len(records) < 16 {
+			break
+		}
+		blocks2 = append(blocks2, parseFloat64(records[0])/1000000.0)
+		for i := 0; i < 18; i++ {
+			cProofs := 4.0*parseFloat64(records[2]) + 32.0*parseFloat64(records[3]) + parseFloat64(records[11]) + parseFloat64(records[12])
+			proofs := 4.0*parseFloat64(records[7]) + 32.0*parseFloat64(records[8]) + parseFloat64(records[14]) + parseFloat64(records[15])
+			switch i {
+			case 1,6:
+				vals[i] = append(vals[i], 4.0*parseFloat64(records[i+1]))
+			case 2,7:
+				vals[i] = append(vals[i], 32.0*parseFloat64(records[i+1]))
+			case 15:
+				vals[i] = append(vals[i], cProofs)
+			case 16:
+				vals[i] = append(vals[i], proofs)
+			case 17:
+				vals[i] = append(vals[i], cProofs + proofs + parseFloat64(records[13]))
+			default:
+				vals[i] = append(vals[i], parseFloat64(records[i+1]))
+			}
+		}
+	}
+	limit := len(blocks)
+	if len(blocks2) < limit {
+		limit = len(blocks2)
+	}
+	var min float64 = 100000000.0
+	var max float64
+	for i := 0; i < limit; i++ {
+		if totalNaked[i] < min {
+			min = totalNaked[i]
+		}
+		if totalNaked[i] > max {
+			max = totalNaked[i]
+		}
+	}
+	fmt.Printf("limit: %d, min total naked: %f, max total naked: %f\n", limit, min, max)
+	colorByBlock := func(xr, yr chart.Range, index int, x, y float64) drawing.Color {
+		if index < 1000000 {
+			return chart.ColorGreen.WithAlpha(100)
+		} else if index < 2000000 {
+			return chart.ColorBlue.WithAlpha(100)
+		} else if index < 3000000 {
+			return chart.ColorRed.WithAlpha(100)
+		} else if index < 4000000 {
+			return chart.ColorBlack.WithAlpha(100)
+		} else if index < 5000000 {
+			return chart.ColorYellow.WithAlpha(100)
+		} else if index < 6000000 {
+			return chart.ColorOrange.WithAlpha(100)
+		} else {
+			return chart.ColorCyan.WithAlpha(100)
+		}
+	}
+	hashSeries := &chart.ContinuousSeries{
+		Name: "Block proof hashes (for contracts) vs naked SLOADs and naked SSTOREs",
+		Style: chart.Style{
+			Show:        true,
+			StrokeWidth: chart.Disabled,
+			DotWidth: 1,
+			DotColorProvider: colorByBlock,
+		},
+		XValues: totalNaked[:limit],
+		YValues: vals[2][:limit],
+	}
+	graph1 := chart.Chart{
+		Width:  1280,
+		Height: 720,
+		Background: chart.Style{
+			Padding: chart.Box{
+				Top: 50,
+			},
+		},
+		XAxis: chart.XAxis{
+			Name:      "operations",
+			NameStyle: chart.StyleShow(),
+			Style:     chart.StyleShow(),
+			TickStyle: chart.Style{
+				TextRotationDegrees: 45.0,
+			},
+			ValueFormatter: func(v interface{}) string {
+				return fmt.Sprintf("%.1f", v.(float64))
+			},
+			GridMajorStyle: chart.Style{
+				Show:        true,
+				StrokeColor: chart.ColorAlternateGray,
+				StrokeWidth: 1.0,
+			},
+		},
+		YAxis: chart.YAxis{
+			Name: "block proof hashes (contracts)",
+			Style: chart.Style{
+				Show: true,
+			},
+			ValueFormatter: func(v interface{}) string {
+				return fmt.Sprintf("%d kB", int(v.(float64)/1024.0))
+			},
+			GridMajorStyle: chart.Style{
+				Show:        true,
+				StrokeColor: chart.ColorAlternateGray,
+				StrokeWidth: 1.0,
+			},
+		},
+		Series: []chart.Series{
+			hashSeries,
+		},
+	}
+	graph1.Elements = []chart.Renderable{chart.LegendThin(&graph1)}
+
+	buffer := bytes.NewBuffer([]byte{})
+	err = graph1.Render(chart.PNG, buffer)
+	check(err)
+	err = ioutil.WriteFile("naked_storage_vs_blockproof.png", buffer.Bytes(), 0644)
+    check(err)	
 }
