@@ -33,7 +33,6 @@ import (
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
-	"github.com/syndtr/goleveldb/leveldb/errors"
 	"golang.org/x/crypto/pbkdf2"
 	"golang.org/x/sync/syncmap"
 )
@@ -681,7 +680,7 @@ func (whisper *Whisper) runMessageLoop(p *Peer, rw p2p.MsgReadWriter) error {
 		}
 		if packet.Size > whisper.MaxMessageSize() {
 			log.Warn("oversized message received", "peer", p.peer.ID())
-			return errors.New("oversized message received")
+			return fmt.Errorf("oversized message received")
 		}
 
 		switch packet.Code {
@@ -693,7 +692,7 @@ func (whisper *Whisper) runMessageLoop(p *Peer, rw p2p.MsgReadWriter) error {
 			var envelopes []*Envelope
 			if err := packet.Decode(&envelopes); err != nil {
 				log.Warn("failed to decode envelopes, peer will be disconnected", "peer", p.peer.ID(), "err", err)
-				return errors.New("invalid envelopes")
+				return fmt.Errorf("invalid envelopes")
 			}
 
 			trouble := false
@@ -701,7 +700,7 @@ func (whisper *Whisper) runMessageLoop(p *Peer, rw p2p.MsgReadWriter) error {
 				cached, err := whisper.add(env, whisper.LightClientMode())
 				if err != nil {
 					trouble = true
-					log.Error("bad envelope received, peer will be disconnected", "peer", p.peer.ID(), "err", err)
+					fmt.Errorf("bad envelope received, peer will be disconnected", "peer", p.peer.ID(), "err", err)
 				}
 				if cached {
 					p.mark(env)
@@ -709,19 +708,19 @@ func (whisper *Whisper) runMessageLoop(p *Peer, rw p2p.MsgReadWriter) error {
 			}
 
 			if trouble {
-				return errors.New("invalid envelope")
+				return fmt.Errorf("invalid envelope")
 			}
 		case powRequirementCode:
 			s := rlp.NewStream(packet.Payload, uint64(packet.Size))
 			i, err := s.Uint()
 			if err != nil {
 				log.Warn("failed to decode powRequirementCode message, peer will be disconnected", "peer", p.peer.ID(), "err", err)
-				return errors.New("invalid powRequirementCode message")
+				return fmt.Errorf("invalid powRequirementCode message")
 			}
 			f := math.Float64frombits(i)
 			if math.IsInf(f, 0) || math.IsNaN(f) || f < 0.0 {
 				log.Warn("invalid value in powRequirementCode message, peer will be disconnected", "peer", p.peer.ID(), "err", err)
-				return errors.New("invalid value in powRequirementCode message")
+				return fmt.Errorf("invalid value in powRequirementCode message")
 			}
 			p.powRequirement = f
 		case bloomFilterExCode:
@@ -733,7 +732,7 @@ func (whisper *Whisper) runMessageLoop(p *Peer, rw p2p.MsgReadWriter) error {
 
 			if err != nil {
 				log.Warn("failed to decode bloom filter exchange message, peer will be disconnected", "peer", p.peer.ID(), "err", err)
-				return errors.New("invalid bloom filter exchange message")
+				return fmt.Errorf("invalid bloom filter exchange message")
 			}
 			p.setBloomFilter(bloom)
 		case p2pMessageCode:
@@ -745,7 +744,7 @@ func (whisper *Whisper) runMessageLoop(p *Peer, rw p2p.MsgReadWriter) error {
 				var envelope Envelope
 				if err := packet.Decode(&envelope); err != nil {
 					log.Warn("failed to decode direct message, peer will be disconnected", "peer", p.peer.ID(), "err", err)
-					return errors.New("invalid direct message")
+					return fmt.Errorf("invalid direct message")
 				}
 				whisper.postEvent(&envelope, true)
 			}
@@ -755,7 +754,7 @@ func (whisper *Whisper) runMessageLoop(p *Peer, rw p2p.MsgReadWriter) error {
 				var request Envelope
 				if err := packet.Decode(&request); err != nil {
 					log.Warn("failed to decode p2p request message, peer will be disconnected", "peer", p.peer.ID(), "err", err)
-					return errors.New("invalid p2p request")
+					return fmt.Errorf("invalid p2p request")
 				}
 				whisper.mailServer.DeliverMail(p, &request)
 			}
